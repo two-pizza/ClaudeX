@@ -1,12 +1,12 @@
 import Foundation
 
-/// Учётные данные Claude Code, лежащие в Keychain под сервисом "Claude Code-credentials".
+/// Claude Code credentials stored in the Keychain under "Claude Code-credentials".
 struct ClaudeCredentials {
     let accessToken: String
     let subscriptionType: String?
     let rateLimitTier: String?
 
-    /// "Max (5x)", "Pro" и т.п. — для шапки меню.
+    /// "Max (5x)", "Pro", etc. - for the panel header.
     var planLabel: String {
         let base: String
         switch subscriptionType?.lowercased() {
@@ -17,7 +17,7 @@ struct ClaudeCredentials {
         case .some(let other) where !other.isEmpty: base = other.capitalized
         default: return "Claude"
         }
-        // rateLimitTier у Max выглядит как "max_5x" / "max_20x"
+        // rateLimitTier on Max plans looks like "max_5x" / "max_20x".
         if let tier = rateLimitTier?.lowercased(),
            let range = tier.range(of: #"(\d+)x"#, options: .regularExpression) {
             return "\(base) (\(tier[range]))"
@@ -26,25 +26,11 @@ struct ClaudeCredentials {
     }
 }
 
-enum KeychainError: LocalizedError {
-    case notFound
-    case denied
-    case malformed
-
-    var errorDescription: String? {
-        switch self {
-        case .notFound:  return "Claude Code не авторизован в Keychain"
-        case .denied:    return "Нет доступа к Keychain — разреши доступ в диалоге"
-        case .malformed: return "Не разобрать запись Keychain"
-        }
-    }
-}
-
 enum Keychain {
-    /// Читаем через /usr/bin/security, а не через SecItemCopyMatching, намеренно:
-    /// ACL элемента привязывается к запрашивающему бинарю, а ad-hoc подпись меняется
-    /// при каждой пересборке — тогда macOS спрашивала бы доступ снова после каждой сборки.
-    /// У /usr/bin/security подпись стабильна, поэтому «Всегда разрешать» даётся один раз.
+    /// Reads via /usr/bin/security rather than SecItemCopyMatching, deliberately:
+    /// the item's ACL binds to the calling binary, and our ad-hoc signature changes
+    /// on every rebuild - macOS would re-prompt after each build. /usr/bin/security
+    /// has a stable signature, so "Always Allow" is granted once.
     static func readCredentials() throws -> ClaudeCredentials {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -54,13 +40,14 @@ enum Keychain {
         process.standardOutput = out
         process.standardError = err
 
-        do { try process.run() } catch { throw KeychainError.notFound }
+        do { try process.run() } catch { throw UsageError.notLoggedIn("Claude Code") }
 
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            throw process.terminationStatus == 128 ? KeychainError.denied : KeychainError.notFound
+            throw process.terminationStatus == 128 ? UsageError.keychainDenied
+                                                   : UsageError.notLoggedIn("Claude Code")
         }
 
         struct Envelope: Decodable {
@@ -75,7 +62,7 @@ enum Keychain {
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
               let oauth = envelope.claudeAiOauth,
               !oauth.accessToken.isEmpty else {
-            throw KeychainError.malformed
+            throw UsageError.malformedAuth
         }
 
         return ClaudeCredentials(accessToken: oauth.accessToken,

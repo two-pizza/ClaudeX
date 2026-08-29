@@ -1,53 +1,48 @@
 import Cocoa
 
-/// Панель внутри выпадающего меню: заголовок, полоски лимитов, время сброса.
-/// Рисуется вручную — так проще держать те же пропорции, что в окне /usage,
-/// чем собирать стек констрейнтов ради статичной раскладки.
+/// The panel inside the dropdown: provider sections with limit bars and reset times.
+/// Drawn by hand - it is easier to keep the same proportions as the /usage screen
+/// than to assemble a constraint stack for a static layout.
 final class UsageMenuView: NSView {
 
     private enum Metrics {
         static let width: CGFloat = 300
         static let sidePadding: CGFloat = 16
         static let topPadding: CGFloat = 12
-        static let headerHeight: CGFloat = 32
-        static let sectionHeight: CGFloat = 30
+        static let headerHeight: CGFloat = 34
         static let rowHeight: CGFloat = 52
+        static let noteHeight: CGFloat = 24
         static let footerHeight: CGFloat = 24
+        static let dividerHeight: CGFloat = 9
         static let barHeight: CGFloat = 6
     }
 
     private enum Element {
         case header(title: String, trailing: String)
-        case section(String)
         case row(UsageRow)
         case note(String)
         case footer(String)
+        case divider
     }
 
     private var elements: [Element] = []
 
-    // MARK: Наполнение
+    // MARK: Content
 
-    func render(snapshot: UsageSnapshot) {
-        var items: [Element] = [.header(title: "Plan usage limits", trailing: snapshot.plan)]
-        if let session = snapshot.session { items.append(.row(session)) }
-        if !snapshot.weekly.isEmpty {
-            items.append(.section("Weekly limits"))
-            items.append(contentsOf: snapshot.weekly.map { Element.row($0) })
+    func render(snapshot: CombinedSnapshot, errors: [String: String]) {
+        var items: [Element] = []
+        for (index, provider) in snapshot.providers.enumerated() {
+            if index > 0 { items.append(.divider) }
+            items.append(.header(title: provider.title, trailing: provider.plan))
+            items.append(contentsOf: provider.rows.map { Element.row($0) })
+            if let credits = provider.credits { items.append(.note(credits)) }
+            if let error = errors[provider.id] { items.append(.note(error)) }
         }
-        if let credits = snapshot.credits { items.append(.note(credits)) }
-        items.append(.footer("Обновлено \(Self.relativeStamp(snapshot.fetchedAt))"))
-        apply(items)
-    }
-
-    func render(error: Error, lastSnapshot: UsageSnapshot?) {
-        var items: [Element] = [.header(title: "Plan usage limits", trailing: "")]
-        items.append(.note(error.localizedDescription))
-        if let last = lastSnapshot {
-            if let session = last.session { items.append(.row(session)) }
-            items.append(contentsOf: last.weekly.map { Element.row($0) })
-            items.append(.footer("Последние данные: \(Self.relativeStamp(last.fetchedAt))"))
+        for (id, message) in errors where !snapshot.providers.contains(where: { $0.id == id }) {
+            items.append(.note("\(id.capitalized): \(message)"))
         }
+        if items.isEmpty { items.append(.note("No data yet")) }
+        items.append(.footer("Updated \(Self.relativeStamp(snapshot.fetchedAt))"))
         apply(items)
     }
 
@@ -61,14 +56,14 @@ final class UsageMenuView: NSView {
     private static func height(of element: Element) -> CGFloat {
         switch element {
         case .header:  return Metrics.headerHeight
-        case .section: return Metrics.sectionHeight
         case .row:     return Metrics.rowHeight
-        case .note:    return Metrics.footerHeight
+        case .note:    return Metrics.noteHeight
         case .footer:  return Metrics.footerHeight
+        case .divider: return Metrics.dividerHeight
         }
     }
 
-    // MARK: Отрисовка
+    // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
         var y = bounds.height - Metrics.topPadding
@@ -82,14 +77,11 @@ final class UsageMenuView: NSView {
             switch element {
             case .header(let title, let trailing):
                 draw(title, font: .systemFont(ofSize: 13, weight: .semibold),
-                     color: .labelColor, in: frame, aligned: .left, baselineFromTop: 4)
+                     color: .labelColor, in: frame, aligned: .left, baselineFromTop: 6)
                 if !trailing.isEmpty {
                     draw(trailing, font: .systemFont(ofSize: 12),
-                         color: .secondaryLabelColor, in: frame, aligned: .right, baselineFromTop: 5)
+                         color: .secondaryLabelColor, in: frame, aligned: .right, baselineFromTop: 7)
                 }
-            case .section(let title):
-                draw(title, font: .systemFont(ofSize: 12, weight: .semibold),
-                     color: .secondaryLabelColor, in: frame, aligned: .left, baselineFromTop: 12)
             case .row(let row):
                 drawRow(row, in: frame)
             case .note(let text):
@@ -97,7 +89,11 @@ final class UsageMenuView: NSView {
                      color: .secondaryLabelColor, in: frame, aligned: .left, baselineFromTop: 4)
             case .footer(let text):
                 draw(text, font: .systemFont(ofSize: 11),
-                     color: .tertiaryLabelColor, in: frame, aligned: .left, baselineFromTop: 4)
+                     color: .tertiaryLabelColor, in: frame, aligned: .left, baselineFromTop: 6)
+            case .divider:
+                let lineRect = NSRect(x: frame.minX, y: frame.midY, width: frame.width, height: 1)
+                NSColor.separatorColor.setFill()
+                lineRect.fill()
             }
         }
     }
@@ -116,7 +112,7 @@ final class UsageMenuView: NSView {
 
         let fraction = max(0, min(row.percent, 100)) / 100
         if fraction > 0 {
-            // Ниже 2 pt полоска вырождается в точку — держим минимальную видимую ширину.
+            // Below 2 pt the bar degenerates into a dot - keep a minimum visible width.
             let filledWidth = max(track.width * fraction, Metrics.barHeight)
             let filled = NSRect(x: track.minX, y: track.minY, width: filledWidth, height: track.height)
             Self.color(for: row.percent).setFill()
@@ -138,7 +134,7 @@ final class UsageMenuView: NSView {
         (text as NSString).draw(at: origin, withAttributes: attributes)
     }
 
-    // MARK: Форматирование
+    // MARK: Formatting
 
     static func color(for percent: Double) -> NSColor {
         switch percent {
@@ -150,8 +146,8 @@ final class UsageMenuView: NSView {
 
     private static let weekdayTime: DateFormatter = {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
-        f.dateFormat = "EE HH:mm"
+        f.locale = Locale(identifier: "en_US")
+        f.dateFormat = "EEE HH:mm"
         return f
     }()
 
@@ -161,18 +157,18 @@ final class UsageMenuView: NSView {
             let seconds = max(0, resetsAt.timeIntervalSinceNow)
             let hours = Int(seconds) / 3600
             let minutes = (Int(seconds) % 3600) / 60
-            return hours > 0 ? "сброс через \(hours) ч \(minutes) мин"
-                             : "сброс через \(minutes) мин"
+            return hours > 0 ? "resets in \(hours) h \(minutes) min"
+                             : "resets in \(minutes) min"
         }
-        return "сброс \(weekdayTime.string(from: resetsAt))"
+        return "resets \(weekdayTime.string(from: resetsAt))"
     }
 
     static func relativeStamp(_ date: Date) -> String {
         let seconds = Int(Date().timeIntervalSince(date))
         switch seconds {
-        case ..<60:   return "только что"
-        case ..<3600: return "\(seconds / 60) мин назад"
-        default:      return "\(seconds / 3600) ч назад"
+        case ..<60:   return "just now"
+        case ..<3600: return "\(seconds / 60) min ago"
+        default:      return "\(seconds / 3600) h ago"
         }
     }
 }

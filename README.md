@@ -1,63 +1,93 @@
-# ClaudeUsageBar
+<h1 align="center">UsageBar</h1>
 
-Индикатор лимитов Claude в строке меню macOS. Показывает то же, что окно `/usage`:
-сессионное 5-часовое окно, недельные лимиты и время сброса.
+<p align="center">
+Claude &amp; Codex usage limits in your macOS menu bar.<br>
+Know how much of your session and weekly window is left - without opening <code>/usage</code>.
+</p>
 
-```
-◔ 11% · 21%        ← кольцо = самое горячее окно, числа = сессия · неделя
-```
+<p align="center">
+<img src="docs/panel.png" width="360" alt="UsageBar panel">
+</p>
 
-## Откуда берутся данные
+## What it shows
 
-`GET https://api.anthropic.com/api/oauth/usage` с OAuth-токеном Claude Code.
-Ответ содержит окна `five_hour` / `seven_day` и массив `limits[]` - тот самый список,
-который рисует сам Claude Code («All models», «Fable»). Приложение читает `limits[]`,
-а на окна откатывается, только если сервер их не собрал.
+Exactly what Claude Code's `/usage` screen shows - live in the menu bar:
 
-Токен берётся из Keychain (сервис `Claude Code-credentials`) через `/usr/bin/security`.
+- **Claude** - current 5-hour session, weekly "All models", per-model weekly windows, reset times
+- **Codex** (optional) - your ChatGPT plan's session and weekly windows
 
-**Токен только читается, никогда не обновляется.** Это осознанно: при refresh сервер
-ротирует refresh-token, и виджет отобрал бы у Claude Code его собственную авторизацию.
-Если токен протух - в меню будет «Токен отклонён», лечится запуском `claude`.
+The ring in the menu bar reflects the hottest window: blue below 75%, orange from 75%, red from 90%.
 
-## Сборка и установка
+## Install
 
 ```bash
-./build.sh              # собрать в build/
-./build.sh --install    # собрать, положить в ~/Applications и запустить
+git clone https://github.com/two-pizza/ClaudeUsageBar.git
+cd ClaudeUsageBar
+./build.sh --install
 ```
 
-Нужен только штатный `swiftc` из Command Line Tools, Xcode-проект не требуется.
-Бандл подписывается ad-hoc - без подписи `SMAppService` отказывается ставить автозапуск.
+That's it. No Xcode project, no dependencies - a single `swiftc` invocation from
+Command Line Tools. The app lands in `~/Applications` and starts immediately.
+Or grab a prebuilt app from [Releases](https://github.com/two-pizza/ClaudeUsageBar/releases).
 
-## Меню
+On first launch macOS may ask for Keychain access - click **Always Allow**.
+The permission is granted to `/usr/bin/security`, so rebuilding the app never re-prompts.
 
-- **Обновить** (⌘R) - внеочередной запрос
-- **Обновлять** - 1 / 2 / 5 / 15 минут (по умолчанию 2 минуты; данные тянутся также
-  при каждом открытии меню и при пробуждении из сна)
-- **Компактно** - только кольцо, без процентов
-- **Запускать при входе** - через `SMAppService`
-- **Открыть настройки на claude.ai**
+## How it works
 
-## Диагностика
+**Claude.** `GET https://api.anthropic.com/api/oauth/usage` with the OAuth token
+Claude Code already keeps in your Keychain (`Claude Code-credentials`). The response
+carries the same `limits[]` array Claude Code renders in `/usage` - so new windows
+("Fable", per-model buckets) appear automatically, with no code changes here.
 
-```bash
-./build/ClaudeUsageBar.app/Contents/MacOS/ClaudeUsageBar --diagnose         # один запрос в консоль
-./build/ClaudeUsageBar.app/Contents/MacOS/ClaudeUsageBar --test-login-item  # проверить автозапуск
-tail -f ~/Library/Logs/ClaudeUsageBar.log                                   # журнал работы
-```
+**Codex.** `GET https://chatgpt.com/backend-api/wham/usage` with the token Codex CLI
+keeps in `~/.codex/auth.json`. Shown automatically when Codex is installed;
+toggle it off in the menu if you don't want it.
 
-Первый запуск может попросить доступ к Keychain - нужно нажать «Всегда разрешать».
-Доступ выдаётся `/usr/bin/security`, поэтому пересборка приложения его не сбрасывает.
+**Tokens are read-only - never refreshed.** Refreshing rotates the refresh token
+and would steal the CLI's own authorization. If a token expires, the panel says so;
+running `claude` or `codex` once fixes it.
 
-## Устройство
+## Menu
 
-| Файл | Ответственность |
+| Item | |
 |---|---|
-| `Sources/Keychain.swift` | чтение токена и плана из Keychain |
-| `Sources/UsageAPI.swift` | запрос, разбор ответа, сборка снимка |
-| `Sources/UsageMenuView.swift` | панель с полосками внутри меню |
-| `Sources/StatusController.swift` | строка меню, кольцо, таймер, настройки |
-| `Sources/Log.swift` | журнал в `~/Library/Logs/` |
+| **Refresh now** (⌘R) | fetch immediately; also refreshes on menu open and on wake from sleep |
+| **Refresh every** | 1 / 2 / 5 / 15 minutes (default 2) |
+| **Compact** | ring only, no percentages |
+| **Show Codex usage** | hide/show the Codex section |
+| **Launch at login** | via `SMAppService` |
 
-Цвет полоски: синий до 75%, оранжевый с 75%, красный с 90%.
+## Troubleshooting
+
+```bash
+# one fetch per provider, printed to the console (tokens never printed)
+~/Applications/ClaudeUsageBar.app/Contents/MacOS/ClaudeUsageBar --diagnose
+
+# runtime log
+tail -f ~/Library/Logs/ClaudeUsageBar.log
+```
+
+| Symptom | Cause / fix |
+|---|---|
+| `—` in the menu bar | first fetch failed; it retries automatically |
+| "not logged in" | run `claude` (or `codex`) once and authenticate |
+| "Token rejected" | same - the CLI refreshes its token on next run |
+| "Rate limited" | the usage endpoint throttled us; next tick recovers |
+
+## Code layout
+
+| File | Responsibility |
+|---|---|
+| `Sources/Models.swift` | shared data model for both providers |
+| `Sources/Keychain.swift` | Claude Code token from the Keychain |
+| `Sources/Providers.swift` | Claude + Codex fetch and response parsing |
+| `Sources/UsageMenuView.swift` | the panel with limit bars |
+| `Sources/StatusController.swift` | status item, ring icon, timer, settings |
+| `Sources/Log.swift` | log file in `~/Library/Logs/` |
+
+See [ROADMAP.md](ROADMAP.md) for what's next (desktop widget, iOS, App Store).
+
+## License
+
+[MIT](LICENSE)

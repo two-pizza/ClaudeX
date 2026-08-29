@@ -8,13 +8,16 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
 
-    private var snapshot: UsageSnapshot?
-    private var lastError: Error?
+    /// Last good result per provider - one provider failing must not blank the other.
+    private var providers: [String: ProviderUsage] = [:]
+    private var errors: [String: String] = [:]
+    private var fetchedAt: Date?
     private var lastFetchStarted: Date?
 
     private enum Defaults {
         static let interval = "refreshIntervalSeconds"
         static let compact  = "compactStatusBar"
+        static let codex    = "showCodex"
     }
 
     private var refreshInterval: TimeInterval {
@@ -22,15 +25,26 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return stored > 0 ? stored : 120
     }
     private var isCompact: Bool { UserDefaults.standard.bool(forKey: Defaults.compact) }
+    private var showCodex: Bool {
+        guard CodexProvider.isInstalled else { return false }
+        return UserDefaults.standard.object(forKey: Defaults.codex) as? Bool ?? true
+    }
 
-    // MARK: Жизненный цикл
+    private var snapshot: CombinedSnapshot? {
+        guard let fetchedAt else { return nil }
+        let order = ["claude", "codex"]
+        let list = order.compactMap { providers[$0] }
+        return CombinedSnapshot(providers: list, fetchedAt: fetchedAt)
+    }
+
+    // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.imagePosition = .imageLeading
         statusItem.menu = buildMenu()
         statusItem.menu?.delegate = self
 
-        // Кольцо рисуется под текущую тему, поэтому перерисовываем при её смене.
+        // The ring is drawn for the current theme - redraw when it changes.
         appearanceObservation = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             DispatchQueue.main.async { self?.updateStatusButton() }
         }
@@ -53,40 +67,60 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.timer = timer
     }
 
-    // MARK: Данные
+    // MARK: Data
 
     @objc private func refresh() {
-        // Меню умеет дёргать обновление при каждом открытии — не частим.
+        // The menu triggers a refresh on every open - don't hammer the API.
         if let started = lastFetchStarted, Date().timeIntervalSince(started) < 5 { return }
         lastFetchStarted = Date()
 
-        UsageAPI.fetch { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
+        let group = DispatchGroup()
+        var fresh: [String: Result<ProviderUsage, UsageError>] = [:]
+        let lock = NSLock()
+
+        func collect(_ id: String, _ result: Result<ProviderUsage, UsageError>) {
+            lock.lock(); fresh[id] = result; lock.unlock()
+            group.leave()
+        }
+
+        group.enter()
+        ClaudeProvider.fetch { collect("claude", $0) }
+        if showCodex {
+            group.enter()
+            CodexProvider.fetch { collect("codex", $0) }
+        } else {
+            providers["codex"] = nil
+            errors["codex"] = nil
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            for (id, result) in fresh {
                 switch result {
-                case .success(let snapshot):
-                    self.snapshot = snapshot
-                    self.lastError = nil
-                    Log.write("данные получены: сессия \(snapshot.session?.percent ?? -1)%, окон \(snapshot.weekly.count)")
+                case .success(let usage):
+                    self.providers[id] = usage
+                    self.errors[id] = nil
+                    Log.write("\(id): ok, hottest \(Int(usage.hottestPercent))%")
                 case .failure(let error):
-                    self.lastError = error
-                    Log.write("запрос не удался: \(error.localizedDescription) [\(error)]")
+                    self.errors[id] = error.localizedDescription
+                    Log.write("\(id): failed - \(error.localizedDescription)")
                 }
-                self.updateStatusButton()
-                self.updatePanel()
             }
+            self.fetchedAt = Date()
+            self.updateStatusButton()
+            self.updatePanel()
         }
     }
 
-    // MARK: Строка меню
+    // MARK: Status bar
 
     private func updateStatusButton() {
         guard let button = statusItem.button else { return }
 
-        guard let snapshot else {
+        guard let snapshot, !snapshot.providers.isEmpty else {
             button.image = Self.ringImage(percent: 0, color: .tertiaryLabelColor)
-            button.title = lastError == nil ? "" : " —"
-            button.toolTip = lastError?.localizedDescription
+            button.title = errors.isEmpty ? "" : " —"
+            button.toolTip = errors.values.joined(separator: "\n")
             return
         }
 
@@ -96,17 +130,19 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if isCompact {
             button.title = ""
         } else {
-            let parts = [snapshot.session?.percent, snapshot.weekly.first?.percent]
-                .compactMap { $0 }
-                .map { String(format: "%.0f%%", $0) }
+            // One number per provider: its hottest window.
+            let parts = snapshot.providers.map { String(format: "%.0f%%", $0.hottestPercent) }
             button.title = parts.isEmpty ? "" : " " + parts.joined(separator: " · ")
         }
 
         button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        button.toolTip = lastError.map { "Последняя попытка не удалась: \($0.localizedDescription)" }
+        button.toolTip = snapshot.providers
+            .map { "\($0.title): \(Int($0.hottestPercent))%" }
+            .joined(separator: "\n")
+            + (errors.isEmpty ? "" : "\n" + errors.values.joined(separator: "\n"))
     }
 
-    /// Кольцевой индикатор: серый ободок плюс дуга по часовой стрелке от 12 часов.
+    /// Ring indicator: gray track plus a clockwise arc from 12 o'clock.
     private static func ringImage(percent: Double, color: NSColor) -> NSImage {
         let side: CGFloat = 15
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
@@ -136,7 +172,14 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return image
     }
 
-    // MARK: Меню
+    // MARK: Menu
+
+    private enum ItemTitle {
+        static let compact = "Compact (ring only)"
+        static let codex   = "Show Codex usage"
+        static let login   = "Launch at login"
+        static let every   = "Refresh every"
+    }
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
@@ -146,15 +189,15 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(panelItem)
         menu.addItem(.separator())
 
-        let refreshItem = NSMenuItem(title: "Обновить", action: #selector(refreshFromMenu),
+        let refreshItem = NSMenuItem(title: "Refresh now", action: #selector(refreshFromMenu),
                                      keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
 
-        let intervalItem = NSMenuItem(title: "Обновлять", action: nil, keyEquivalent: "")
+        let intervalItem = NSMenuItem(title: ItemTitle.every, action: nil, keyEquivalent: "")
         let intervalMenu = NSMenu()
-        for (title, seconds) in [("каждую минуту", 60.0), ("каждые 2 минуты", 120.0),
-                                 ("каждые 5 минут", 300.0), ("каждые 15 минут", 900.0)] {
+        for (title, seconds) in [("1 minute", 60.0), ("2 minutes", 120.0),
+                                 ("5 minutes", 300.0), ("15 minutes", 900.0)] {
             let item = NSMenuItem(title: title, action: #selector(setInterval(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = seconds
@@ -164,26 +207,31 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         intervalItem.submenu = intervalMenu
         menu.addItem(intervalItem)
 
-        let compactItem = NSMenuItem(title: "Компактно (только кольцо)",
+        let compactItem = NSMenuItem(title: ItemTitle.compact,
                                      action: #selector(toggleCompact), keyEquivalent: "")
         compactItem.target = self
-        compactItem.state = isCompact ? .on : .off
         menu.addItem(compactItem)
 
-        let loginItem = NSMenuItem(title: "Запускать при входе",
+        if CodexProvider.isInstalled {
+            let codexItem = NSMenuItem(title: ItemTitle.codex,
+                                       action: #selector(toggleCodex), keyEquivalent: "")
+            codexItem.target = self
+            menu.addItem(codexItem)
+        }
+
+        let loginItem = NSMenuItem(title: ItemTitle.login,
                                    action: #selector(toggleLoginItem), keyEquivalent: "")
         loginItem.target = self
-        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
 
-        let siteItem = NSMenuItem(title: "Открыть настройки на claude.ai",
+        let siteItem = NSMenuItem(title: "Open claude.ai usage settings",
                                   action: #selector(openSettings), keyEquivalent: "")
         siteItem.target = self
         menu.addItem(siteItem)
 
-        let quitItem = NSMenuItem(title: "Выйти", action: #selector(NSApplication.terminate(_:)),
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)),
                                   keyEquivalent: "q")
         menu.addItem(quitItem)
 
@@ -192,15 +240,15 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         updatePanel()
-        refresh()
-        // Галочки могли разъехаться, если настройки менялись из другого места.
+        // Refresh on open only when the data is stale: the usage endpoints
+        // rate-limit aggressively (429) if polled on every click.
+        if let fetchedAt, Date().timeIntervalSince(fetchedAt) < 60 { } else { refresh() }
         for item in menu.items {
             switch item.title {
-            case "Компактно (только кольцо)":
-                item.state = isCompact ? .on : .off
-            case "Запускать при входе":
-                item.state = SMAppService.mainApp.status == .enabled ? .on : .off
-            case "Обновлять":
+            case ItemTitle.compact: item.state = isCompact ? .on : .off
+            case ItemTitle.codex:   item.state = showCodex ? .on : .off
+            case ItemTitle.login:   item.state = SMAppService.mainApp.status == .enabled ? .on : .off
+            case ItemTitle.every:
                 item.submenu?.items.forEach {
                     $0.state = ($0.representedObject as? Double) == refreshInterval ? .on : .off
                 }
@@ -210,14 +258,11 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updatePanel() {
-        if let snapshot, lastError == nil {
-            panel.render(snapshot: snapshot)
-        } else if let lastError {
-            panel.render(error: lastError, lastSnapshot: snapshot)
-        }
+        let current = snapshot ?? CombinedSnapshot(providers: [], fetchedAt: Date())
+        panel.render(snapshot: current, errors: errors)
     }
 
-    // MARK: Действия
+    // MARK: Actions
 
     @objc private func refreshFromMenu() {
         lastFetchStarted = nil
@@ -235,6 +280,12 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusButton()
     }
 
+    @objc private func toggleCodex() {
+        UserDefaults.standard.set(!showCodex, forKey: Defaults.codex)
+        lastFetchStarted = nil
+        refresh()
+    }
+
     @objc private func toggleLoginItem() {
         do {
             if SMAppService.mainApp.status == .enabled {
@@ -244,7 +295,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Не удалось изменить автозапуск"
+            alert.messageText = "Could not change the login item"
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
