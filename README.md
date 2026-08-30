@@ -1,4 +1,4 @@
-<h1 align="center">UsageBar</h1>
+<h1 align="center">ClaudeX</h1>
 
 <p align="center">
 Claude &amp; Codex usage limits in your macOS menu bar.<br>
@@ -6,7 +6,7 @@ Know how much of your session and weekly window is left - without opening <code>
 </p>
 
 <p align="center">
-<img src="docs/panel.png" width="360" alt="UsageBar panel">
+<img src="docs/panel.png" width="360" alt="ClaudeX panel">
 </p>
 
 ## What it shows
@@ -21,14 +21,14 @@ The ring in the menu bar reflects the hottest window: blue below 75%, orange fro
 ## Install
 
 ```bash
-git clone https://github.com/two-pizza/ClaudeUsageBar.git
-cd ClaudeUsageBar
+git clone https://github.com/two-pizza/ClaudeX.git
+cd ClaudeX
 ./build.sh --install
 ```
 
 That's it. No Xcode project, no dependencies - a single `swiftc` invocation from
 Command Line Tools. The app lands in `~/Applications` and starts immediately.
-Or grab a prebuilt app from [Releases](https://github.com/two-pizza/ClaudeUsageBar/releases).
+Or grab a prebuilt app from [Releases](https://github.com/two-pizza/ClaudeX/releases).
 
 On first launch macOS may ask for Keychain access - click **Always Allow**.
 The permission is granted to `/usr/bin/security`, so rebuilding the app never re-prompts.
@@ -62,10 +62,10 @@ running `claude` or `codex` once fixes it.
 
 ```bash
 # one fetch per provider, printed to the console (tokens never printed)
-~/Applications/ClaudeUsageBar.app/Contents/MacOS/ClaudeUsageBar --diagnose
+~/Applications/ClaudeX.app/Contents/MacOS/ClaudeX --diagnose
 
 # runtime log
-tail -f ~/Library/Logs/ClaudeUsageBar.log
+tail -f ~/Library/Logs/ClaudeX.log
 ```
 
 | Symptom | Cause / fix |

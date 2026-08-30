@@ -1,6 +1,13 @@
 import Cocoa
 import ServiceManagement
 
+// Remove this bundle's login item. Used when retiring an old bundle identifier.
+if CommandLine.arguments.contains("--unregister-login-item") {
+    try? SMAppService.mainApp.unregister()
+    print("login item status: \(SMAppService.mainApp.status.rawValue) (0 = not registered)")
+    exit(0)
+}
+
 // Login-item check: register, read status, restore.
 if CommandLine.arguments.contains("--test-login-item") {
     let was = SMAppService.mainApp.status

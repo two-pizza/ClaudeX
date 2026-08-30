@@ -7,7 +7,7 @@ enum Log {
         let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("ClaudeUsageBar.log")
+        return dir.appendingPathComponent("ClaudeX.log")
     }()
 
     private static let stamp: DateFormatter = {

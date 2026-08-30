@@ -1,9 +1,9 @@
 #!/bin/bash
-# Сборка ClaudeUsageBar.app. С флагом --install кладёт готовый бандл в ~/Applications и перезапускает.
+# Сборка ClaudeX.app. С флагом --install кладёт готовый бандл в ~/Applications и перезапускает.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-NAME="ClaudeUsageBar"
+NAME="ClaudeX"
 APP="$ROOT/build/$NAME.app"
 INSTALL_DIR="$HOME/Applications"
 
@@ -16,7 +16,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>            <string>$NAME</string>
-    <key>CFBundleDisplayName</key>     <string>Claude Usage</string>
+    <key>CFBundleDisplayName</key>     <string>ClaudeX</string>
     <key>CFBundleIdentifier</key>      <string>me.andrey.$NAME</string>
     <key>CFBundleExecutable</key>      <string>$NAME</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
