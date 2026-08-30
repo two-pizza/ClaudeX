@@ -52,11 +52,21 @@ if CommandLine.arguments.contains("--diagnose") {
     // The App Group is easy to break silently: a wrong team id yields a
     // valid-looking build whose widget never receives anything.
     print("App Group: \(SharedStore.appGroup)")
-    if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedStore.appGroup) != nil {
+    let container = FileManager.default
+        .containerURL(forSecurityApplicationGroupIdentifier: SharedStore.appGroup)
+    // A directory is handed out even for a group this build has no entitlement
+    // for, so its mere existence proves nothing. On macOS the identifier must
+    // carry the team prefix, or the widget looks in a different container.
+    let hasTeamPrefix = SharedStore.appGroup.contains(".group.")
+    switch (container, hasTeamPrefix) {
+    case (.some, true):
         print("  container: available - the widget will receive updates")
-    } else {
-        print("  container: UNAVAILABLE - widget will show no data")
-        print("  (expected for a plain ./build.sh build; for the Xcode build check Team.xcconfig)")
+    case (.some, false):
+        print("  container: present but the group has NO team prefix")
+        print("  (normal for ./build.sh, which builds the app alone; the widget needs the Xcode build)")
+    case (.none, _):
+        print("  container: UNAVAILABLE - the widget would show no data")
+        print("  (check DEVELOPMENT_TEAM in Team.xcconfig)")
     }
 
     ClaudeProvider.fetch { report("Claude", $0) }
