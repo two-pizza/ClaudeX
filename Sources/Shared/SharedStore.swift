@@ -16,7 +16,7 @@ enum SharedStore {
     /// on iOS it must not. Same group, two spellings.
     static let appGroup: String = {
         #if os(macOS)
-        return "Q88AAT3T5N.group.me.andrey.ClaudeX"
+        return "74XZ56V5VY.group.me.andrey.ClaudeX"
         #else
         return "group.me.andrey.ClaudeX"
         #endif
