@@ -1,0 +1,56 @@
+# Xcode project for the app + WidgetKit extension.
+# Generate with: xcodegen generate   (the .xcodeproj itself is not committed)
+#
+# The plain ./build.sh path still works and needs no Xcode - it builds the
+# menu bar app alone, without the widget. Use it for quick iteration.
+name: ClaudeX
+options:
+  bundleIdPrefix: me.andrey
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: Q88AAT3T5N
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.1.0"
+    CURRENT_PROJECT_VERSION: "2"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  ClaudeX:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Shared
+      - path: Sources/App
+    dependencies:
+      - target: ClaudeXWidget
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.andrey.ClaudeX
+        PRODUCT_NAME: ClaudeX
+        CODE_SIGN_ENTITLEMENTS: Resources/ClaudeX.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        # Menu bar only, no Dock icon.
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ClaudeX
+        INFOPLIST_KEY_NSHumanReadableCopyright: "MIT"
+
+  ClaudeXWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/Shared
+      - path: Sources/Widget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.andrey.ClaudeX.widget
+        PRODUCT_NAME: ClaudeXWidget
+        CODE_SIGN_ENTITLEMENTS: Resources/ClaudeXWidget.entitlements
+        INFOPLIST_FILE: Resources/ClaudeXWidget-Info.plist
+        # Models.swift compiles the fetching-layer error type out of the widget.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: WIDGET_TARGET

@@ -33,7 +33,7 @@ echo "==> Компиляция"
 swiftc -O -whole-module-optimization \
        -target arm64-apple-macos13.0 \
        -o "$APP/Contents/MacOS/$NAME" \
-       "$ROOT"/Sources/*.swift
+       $(find "$ROOT/Sources/Shared" "$ROOT/Sources/App" -name '*.swift')
 
 # Подпись обязательна: без неё SMAppService откажется регистрировать автозапуск.
 echo "==> Подпись (ad-hoc)"

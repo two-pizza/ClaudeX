@@ -26,8 +26,9 @@ cd ClaudeX
 ./build.sh --install
 ```
 
-That's it. No Xcode project, no dependencies - a single `swiftc` invocation from
+That's it. No Xcode, no dependencies - a single `swiftc` invocation from
 Command Line Tools. The app lands in `~/Applications` and starts immediately.
+This builds the menu bar app; the desktop widget needs Xcode (see below).
 Or grab a prebuilt app from [Releases](https://github.com/two-pizza/ClaudeX/releases).
 
 On first launch macOS may ask for Keychain access - click **Always Allow**.
@@ -47,6 +48,25 @@ toggle it off in the menu if you don't want it.
 **Tokens are read-only - never refreshed.** Refreshing rotates the refresh token
 and would steal the CLI's own authorization. If a token expires, the panel says so;
 running `claude` or `codex` once fixes it.
+
+## Desktop widget
+
+A WidgetKit widget for the desktop and Notification Center is in the tree
+(`Sources/Widget/`). It needs Xcode and an Apple Developer team, because the
+data crosses an App Group:
+
+```bash
+xcodegen generate      # creates ClaudeX.xcodeproj from project.yml
+open ClaudeX.xcodeproj # build and run the ClaudeX scheme
+```
+
+The widget never fetches anything. A widget extension is sandboxed and cannot
+reach the Keychain, so the app writes each fresh snapshot into the shared
+container and calls `WidgetCenter.reloadAllTimelines()`; the widget only reads.
+Only rendered numbers cross that boundary - never tokens.
+
+The app itself is deliberately **not** sandboxed: the sandbox would cut off the
+Keychain item it reads. The widget extension is sandboxed, as macOS requires.
 
 ## Menu
 
@@ -79,12 +99,14 @@ tail -f ~/Library/Logs/ClaudeX.log
 
 | File | Responsibility |
 |---|---|
-| `Sources/Models.swift` | shared data model for both providers |
-| `Sources/Keychain.swift` | Claude Code token from the Keychain |
-| `Sources/Providers.swift` | Claude + Codex fetch and response parsing |
-| `Sources/UsageMenuView.swift` | the panel with limit bars |
-| `Sources/StatusController.swift` | status item, ring icon, timer, settings |
-| `Sources/Log.swift` | log file in `~/Library/Logs/` |
+| `Sources/Shared/Models.swift` | shared data model for both providers |
+| `Sources/App/Keychain.swift` | Claude Code token from the Keychain |
+| `Sources/App/Providers.swift` | Claude + Codex fetch and response parsing |
+| `Sources/App/UsageMenuView.swift` | the panel with limit bars |
+| `Sources/App/StatusController.swift` | status item, ring icon, timer, settings |
+| `Sources/App/Log.swift` | log file in `~/Library/Logs/` |
+| `Sources/Shared/SharedStore.swift` | snapshot handoff to the widget |
+| `Sources/Widget/` | WidgetKit extension (small / medium / large) |
 
 See [ROADMAP.md](ROADMAP.md) for what's next (desktop widget, iOS, App Store).
 

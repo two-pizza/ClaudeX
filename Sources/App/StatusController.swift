@@ -1,5 +1,8 @@
 import Cocoa
 import ServiceManagement
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
@@ -109,7 +112,18 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.fetchedAt = Date()
             self.updateStatusButton()
             self.updatePanel()
+            self.publishToWidget()
         }
+    }
+
+    /// Hands the fresh numbers to the widget. No-op in builds without the
+    /// App Group entitlement, so the ad-hoc build keeps working unchanged.
+    private func publishToWidget() {
+        guard let snapshot else { return }
+        guard SharedStore.write(snapshot: snapshot, errors: errors) else { return }
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
     }
 
     // MARK: Status bar

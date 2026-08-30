@@ -1,7 +1,7 @@
 import Foundation
 
 /// One limit bar: a usage window with its reset time.
-struct UsageRow {
+struct UsageRow: Codable, Hashable {
     let title: String
     let percent: Double
     let resetsAt: Date?
@@ -12,7 +12,7 @@ struct UsageRow {
 }
 
 /// Usage of one provider (Claude or Codex) as shown in the panel.
-struct ProviderUsage {
+struct ProviderUsage: Codable, Hashable {
     let id: String
     let title: String
     let plan: String
@@ -23,13 +23,14 @@ struct ProviderUsage {
 }
 
 /// Everything the status item needs to render.
-struct CombinedSnapshot {
+struct CombinedSnapshot: Codable, Hashable {
     let providers: [ProviderUsage]
     let fetchedAt: Date
 
     var headlinePercent: Double { providers.map(\.hottestPercent).max() ?? 0 }
 }
 
+#if !WIDGET_TARGET
 enum UsageError: LocalizedError {
     case notLoggedIn(String)
     case keychainDenied
@@ -51,3 +52,4 @@ enum UsageError: LocalizedError {
         }
     }
 }
+#endif

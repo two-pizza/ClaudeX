@@ -1,3 +1,8 @@
 build/
 *.log
 .DS_Store
+# Generated from project.yml by xcodegen - not committed on purpose,
+# so the checked-in source of truth stays the yaml.
+*.xcodeproj
+xcuserdata/
+DerivedData/

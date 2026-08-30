@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Deliberately NOT sandboxed: the app reads the Claude Code Keychain item
+         through /usr/bin/security, which the sandbox would cut off. App Groups
+         work for non-sandboxed macOS apps too - the container simply lives in
+         ~/Library/Group Containers/. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>Q88AAT3T5N.group.me.andrey.ClaudeX</string>
+    </array>
+</dict>
+</plist>
