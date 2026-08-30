@@ -10,9 +10,13 @@ options:
     macOS: "14.0"
   createIntermediateGroups: true
 
+# The team id lives in Team.xcconfig - change it there, not here.
+configFiles:
+  Debug: Team.xcconfig
+  Release: Team.xcconfig
+
 settings:
   base:
-    DEVELOPMENT_TEAM: 74XZ56V5VY
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.1.0"
@@ -34,11 +38,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.andrey.ClaudeX
         PRODUCT_NAME: ClaudeX
         CODE_SIGN_ENTITLEMENTS: Resources/ClaudeX.entitlements
-        GENERATE_INFOPLIST_FILE: YES
-        # Menu bar only, no Dock icon.
-        INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_CFBundleDisplayName: ClaudeX
-        INFOPLIST_KEY_NSHumanReadableCopyright: "MIT"
+        INFOPLIST_FILE: Resources/ClaudeX-Info.plist
 
   ClaudeXWidget:
     type: app-extension

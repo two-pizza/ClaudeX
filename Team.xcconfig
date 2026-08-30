@@ -1,0 +1,10 @@
+// Your Apple Developer team id - the ONE place to change when building
+// ClaudeX under your own account. Find it in the certificate's OU field:
+//
+//   security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject
+//
+// Note this is NOT the identifier printed in parentheses after the email in
+// `security find-identity` - that one is the certificate id and will not work.
+//
+// The App Group is derived from it, so app and widget always agree.
+DEVELOPMENT_TEAM = 74XZ56V5VY

@@ -56,9 +56,23 @@ A WidgetKit widget for the desktop and Notification Center is in the tree
 data crosses an App Group:
 
 ```bash
-xcodegen generate      # creates ClaudeX.xcodeproj from project.yml
-open ClaudeX.xcodeproj # build and run the ClaudeX scheme
+# 1. put your Apple Developer team id in Team.xcconfig (one line, comments explain where to find it)
+# 2. generate and build
+xcodegen generate
+xcodebuild -project ClaudeX.xcodeproj -scheme ClaudeX -configuration Release build
 ```
+
+The App Group is derived from that team id, so app and widget always agree and
+no source file needs editing. To verify the handoff actually works:
+
+```bash
+ClaudeX.app/Contents/MacOS/ClaudeX --diagnose
+# App Group: <TEAM>.group.me.andrey.ClaudeX
+#   container: available - the widget will receive updates
+```
+
+Check that line. A wrong team id still produces a valid-looking signed build -
+one whose widget silently never receives anything.
 
 The widget never fetches anything. A widget extension is sandboxed and cannot
 reach the Keychain, so the app writes each fresh snapshot into the shared

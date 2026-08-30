@@ -8,7 +8,7 @@
     <true/>
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>74XZ56V5VY.group.me.andrey.ClaudeX</string>
+        <string>$(DEVELOPMENT_TEAM).group.me.andrey.ClaudeX</string>
     </array>
 </dict>
 </plist>

@@ -12,14 +12,19 @@ import Foundation
 /// which is a far weaker guarantee than the Keychain.
 enum SharedStore {
 
-    /// On macOS an App Group identifier must carry the team prefix;
-    /// on iOS it must not. Same group, two spellings.
+    /// Declared once in the build settings (project.yml) and injected into
+    /// both Info.plists, so building under a different Apple Developer team
+    /// needs no source edits - only TEAM=XXXXXXXXXX at generate time.
+    ///
+    /// On macOS the identifier carries the team prefix; on iOS it must not.
     static let appGroup: String = {
-        #if os(macOS)
-        return "74XZ56V5VY.group.me.andrey.ClaudeX"
-        #else
+        if let declared = Bundle.main.object(forInfoDictionaryKey: "AppGroupIdentifier") as? String,
+           !declared.isEmpty, !declared.hasPrefix("$(") {
+            return declared
+        }
+        // Plain ./build.sh produces no Info.plist key; the group is then
+        // unavailable anyway and every call below degrades to a no-op.
         return "group.me.andrey.ClaudeX"
-        #endif
     }()
 
     /// What the widget renders. Errors are carried as text rather than as

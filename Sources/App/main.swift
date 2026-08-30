@@ -49,6 +49,16 @@ if CommandLine.arguments.contains("--diagnose") {
         finish()
     }
 
+    // The App Group is easy to break silently: a wrong team id yields a
+    // valid-looking build whose widget never receives anything.
+    print("App Group: \(SharedStore.appGroup)")
+    if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedStore.appGroup) != nil {
+        print("  container: available - the widget will receive updates")
+    } else {
+        print("  container: UNAVAILABLE - widget will show no data")
+        print("  (expected for a plain ./build.sh build; for the Xcode build check Team.xcconfig)")
+    }
+
     ClaudeProvider.fetch { report("Claude", $0) }
     if CodexProvider.isInstalled { CodexProvider.fetch { report("Codex", $0) } }
     _ = done.wait(timeout: .now() + 40)
