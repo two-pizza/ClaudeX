@@ -42,7 +42,7 @@ struct UsageWidget: Widget {
                 .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("ClaudeX")
-        .description("Claude and Codex usage limits.")
+        .description("What is left of your Claude and Codex limits.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -63,7 +63,7 @@ extension SharedStore.Payload {
                 UsageRow(title: "Fable", percent: 15,
                          resetsAt: now.addingTimeInterval(4 * 86400), isSession: false, isActive: false),
             ],
-            credits: nil)
+            credits: nil, fetchedAt: now)
         let codex = ProviderUsage(
             id: "codex", title: "Codex", plan: "Plus",
             rows: [
@@ -72,7 +72,7 @@ extension SharedStore.Payload {
                 UsageRow(title: "Weekly", percent: 40,
                          resetsAt: now.addingTimeInterval(4 * 86400), isSession: false, isActive: true),
             ],
-            credits: nil)
+            credits: nil, fetchedAt: now)
         return SharedStore.Payload(
             snapshot: CombinedSnapshot(providers: [claude, codex], fetchedAt: now),
             errors: [:], writtenAt: now)

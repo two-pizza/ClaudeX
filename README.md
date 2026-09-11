@@ -2,7 +2,7 @@
 
 <p align="center">
 Claude &amp; Codex usage limits in your macOS menu bar.<br>
-Know how much of your session and weekly window is left - without opening <code>/usage</code>.
+See how much of your session and weekly window is <em>left</em> - without opening <code>/usage</code>.
 </p>
 
 <p align="center">
@@ -11,12 +11,20 @@ Know how much of your session and weekly window is left - without opening <code>
 
 ## What it shows
 
-Exactly what Claude Code's `/usage` screen shows - live in the menu bar:
+The same windows Claude Code's `/usage` screen shows, but as **what is left**,
+because that is the number you act on:
 
-- **Claude** - current 5-hour session, weekly "All models", per-model weekly windows, reset times
-- **Codex** (optional) - your ChatGPT plan's session and weekly windows
+- **Claude** - what remains of the 5-hour session (big), of the weekly "All models"
+  window, and of each per-model weekly window (folded behind *Model limits*), with reset times
+- **Codex** (optional) - the same for your ChatGPT plan's session and weekly windows
 
-The ring in the menu bar reflects the hottest window: blue below 75%, orange from 75%, red from 90%.
+Menu bar: `C 88% · X 68%` - session left per provider, kept apart so you can see who
+is running out. The ring shows the tightest window of all: blue while more than 25%
+is left, orange below 25%, red below 10%.
+
+Freshness is per provider. When one provider's fetch fails, its last numbers stay
+on screen dimmed, marked *Stale* with the time of the last successful update and the
+error - the other provider is unaffected, and nothing ever pretends to be "just updated".
 
 ## Install
 
@@ -89,6 +97,7 @@ Keychain item it reads. The widget extension is sandboxed, as macOS requires.
 | **Refresh now** (⌘R) | fetch immediately; also refreshes on menu open and on wake from sleep |
 | **Refresh every** | 1 / 2 / 5 / 15 minutes (default 2) |
 | **Compact** | ring only, no percentages |
+| **Model limits** (in the panel) | click to unfold per-model weekly windows |
 | **Show Codex usage** | hide/show the Codex section |
 | **Launch at login** | via `SMAppService` |
 

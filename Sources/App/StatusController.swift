@@ -11,10 +11,13 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
 
-    /// Last good result per provider - one provider failing must not blank the other.
+    /// Last good result per provider, each carrying its own fetchedAt - one
+    /// provider failing must not blank the other, and a failure must not
+    /// refresh the timestamp of numbers it did not deliver.
     private var providers: [String: ProviderUsage] = [:]
     private var errors: [String: String] = [:]
-    private var fetchedAt: Date?
+    /// When the last refresh cycle finished, whatever its outcome.
+    private var lastAttemptAt: Date?
     private var lastFetchStarted: Date?
 
     private enum Defaults {
@@ -34,10 +37,10 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var snapshot: CombinedSnapshot? {
-        guard let fetchedAt else { return nil }
+        guard let lastAttemptAt else { return nil }
         let order = ["claude", "codex"]
         let list = order.compactMap { providers[$0] }
-        return CombinedSnapshot(providers: list, fetchedAt: fetchedAt)
+        return CombinedSnapshot(providers: list, fetchedAt: lastAttemptAt)
     }
 
     // MARK: Lifecycle
@@ -100,16 +103,19 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             for (id, result) in fresh {
                 switch result {
-                case .success(let usage):
+                case .success(var usage):
+                    usage.fetchedAt = Date()
                     self.providers[id] = usage
                     self.errors[id] = nil
-                    Log.write("\(id): ok, hottest \(Int(usage.hottestPercent))%")
+                    Log.write("\(id): ok, session \(Int(usage.headlineRemaining))% left, tightest \(Int(usage.tightestRemaining))%")
                 case .failure(let error):
+                    // Keep the old numbers and their old timestamp; the panel
+                    // marks them stale instead of pretending they are new.
                     self.errors[id] = error.localizedDescription
                     Log.write("\(id): failed - \(error.localizedDescription)")
                 }
             }
-            self.fetchedAt = Date()
+            self.lastAttemptAt = Date()
             self.updateStatusButton()
             self.updatePanel()
             self.publishToWidget()
@@ -132,32 +138,42 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let button = statusItem.button else { return }
 
         guard let snapshot, !snapshot.providers.isEmpty else {
-            button.image = Self.ringImage(percent: 0, color: .tertiaryLabelColor)
+            // No successful fetch yet: no number, never a fake 0%.
+            button.image = Self.ringImage(remaining: nil, color: .tertiaryLabelColor)
             button.title = errors.isEmpty ? "" : " —"
-            button.toolTip = errors.values.joined(separator: "\n")
+            button.toolTip = errors.isEmpty ? "Loading usage…" : errors.values.joined(separator: "\n")
             return
         }
 
-        let headline = snapshot.headlinePercent
-        button.image = Self.ringImage(percent: headline, color: UsageMenuView.color(for: headline))
+        let tightest = snapshot.tightestRemaining
+        button.image = Self.ringImage(remaining: tightest, color: UsageMenuView.color(remaining: tightest))
 
         if isCompact {
             button.title = ""
         } else {
-            // One number per provider: its hottest window.
-            let parts = snapshot.providers.map { String(format: "%.0f%%", $0.hottestPercent) }
-            button.title = parts.isEmpty ? "" : " " + parts.joined(separator: " · ")
+            // One number per provider - what is left of its session. Kept
+            // apart on purpose: "C 88% · X 12%" says who is running out.
+            let parts = snapshot.providers.map { provider in
+                let value = String(format: "%.0f%%", provider.headlineRemaining)
+                return "\(provider.shortLabel) \(value)"
+            }
+            button.title = " " + parts.joined(separator: " · ")
         }
 
         button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        button.toolTip = snapshot.providers
-            .map { "\($0.title): \(Int($0.hottestPercent))%" }
-            .joined(separator: "\n")
-            + (errors.isEmpty ? "" : "\n" + errors.values.joined(separator: "\n"))
+        var lines = snapshot.providers.map { provider -> String in
+            var line = "\(provider.title): \(Int(provider.headlineRemaining))% of session left"
+            if let weekly = provider.weeklyRow { line += ", \(Int(weekly.remaining))% of week" }
+            if errors[provider.id] != nil { line += " (stale)" }
+            return line
+        }
+        lines.append(contentsOf: errors.values)
+        button.toolTip = lines.joined(separator: "\n")
     }
 
-    /// Ring indicator: gray track plus a clockwise arc from 12 o'clock.
-    private static func ringImage(percent: Double, color: NSColor) -> NSImage {
+    /// Ring indicator: gray track plus a clockwise arc showing what is left.
+    /// A full ring means the whole window is still available.
+    private static func ringImage(remaining: Double?, color: NSColor) -> NSImage {
         let side: CGFloat = 15
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             let lineWidth: CGFloat = 2.4
@@ -170,7 +186,8 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSColor.quaternaryLabelColor.setStroke()
             track.stroke()
 
-            let fraction = max(0, min(percent, 100)) / 100
+            guard let remaining else { return true }
+            let fraction = max(0, min(remaining, 100)) / 100
             if fraction > 0 {
                 let arc = NSBezierPath()
                 arc.appendArc(withCenter: center, radius: radius,
@@ -256,7 +273,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatePanel()
         // Refresh on open only when the data is stale: the usage endpoints
         // rate-limit aggressively (429) if polled on every click.
-        if let fetchedAt, Date().timeIntervalSince(fetchedAt) < 60 { } else { refresh() }
+        if let lastAttemptAt, Date().timeIntervalSince(lastAttemptAt) < 60 { } else { refresh() }
         for item in menu.items {
             switch item.title {
             case ItemTitle.compact: item.state = isCompact ? .on : .off
