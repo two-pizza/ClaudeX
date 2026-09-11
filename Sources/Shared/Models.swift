@@ -33,14 +33,16 @@ struct ProviderUsage: Codable, Hashable {
     /// One letter for the menu bar: "C 88% · X 68%".
     var shortLabel: String { id == "codex" ? "X" : "C" }
 
-    /// The 5-hour window - the number that runs out first in practice.
+    /// The 5-hour window - the number that runs out first in practice. When a
+    /// provider reports no session window (Codex does that at times) the first
+    /// window takes the headline instead, and is then not repeated below it.
     var sessionRow: UsageRow? { rows.first(where: \.isSession) ?? rows.first }
     /// The overall weekly window ("All models" for Claude, "Weekly" for Codex).
-    var weeklyRow: UsageRow? { rows.first(where: { !$0.isSession }) }
+    var weeklyRow: UsageRow? { rows.first(where: { !$0.isSession && $0 != sessionRow }) }
     /// Per-model weekly windows, collapsed behind "Model limits" in the panel.
     var modelRows: [UsageRow] {
         guard let weeklyRow else { return [] }
-        return rows.filter { !$0.isSession && $0 != weeklyRow }
+        return rows.filter { !$0.isSession && $0 != weeklyRow && $0 != sessionRow }
     }
 
     /// What is left of the session - the headline number for this provider.

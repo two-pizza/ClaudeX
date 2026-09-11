@@ -4,6 +4,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 NAME="ClaudeX"
+# One source of truth for the version: project.yml (the Xcode build reads the same keys).
+VERSION="$(sed -n 's/^ *MARKETING_VERSION: *"\([^"]*\)".*/\1/p' "$ROOT/project.yml")"
+BUILD_NUMBER="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\([^"]*\)".*/\1/p' "$ROOT/project.yml")"
+VERSION="${VERSION:-0.0.0}"; BUILD_NUMBER="${BUILD_NUMBER:-1}"
 APP="$ROOT/build/$NAME.app"
 INSTALL_DIR="$HOME/Applications"
 
@@ -20,8 +24,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>      <string>me.andrey.$NAME</string>
     <key>CFBundleExecutable</key>      <string>$NAME</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>CFBundleShortVersionString</key> <string>1.0</string>
-    <key>CFBundleVersion</key>         <string>1</string>
+    <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
+    <key>CFBundleVersion</key>         <string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key>  <string>13.0</string>
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
