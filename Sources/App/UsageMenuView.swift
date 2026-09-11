@@ -206,41 +206,51 @@ final class UsageMenuView: NSView {
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.cardRadius, yRadius: Metrics.cardRadius)
             NSColor.labelColor.withAlphaComponent(0.06).setFill()
             path.fill()
-            NSColor.separatorColor.withAlphaComponent(0.5).setStroke()
+            NSColor.separatorColor.setStroke()
             path.lineWidth = 1
             path.stroke()
         }
 
         for (item, frame) in frames {
-            let alpha: CGFloat = item.dimmed ? 0.45 : 1
-            draw(item.element, in: frame, alpha: alpha)
+            guard item.dimmed, let ctx = NSGraphicsContext.current?.cgContext else {
+                draw(item.element, in: frame)
+                continue
+            }
+            // Stale numbers fade as a whole. System colours carry their own
+            // alpha, so fading them one by one would override it.
+            ctx.saveGState()
+            ctx.setAlpha(0.45)
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            draw(item.element, in: frame)
+            ctx.endTransparencyLayer()
+            ctx.restoreGState()
         }
     }
 
-    private func draw(_ element: Element, in frame: NSRect, alpha: CGFloat) {
+    private func draw(_ element: Element, in frame: NSRect) {
         switch element {
         case .header(let title, let plan):
             text(title, font: .systemFont(ofSize: 13, weight: .semibold),
-                 color: .labelColor.withAlphaComponent(alpha), in: frame, aligned: .left, baselineFromTop: 4)
+                 color: .labelColor, in: frame, aligned: .left, baselineFromTop: 4)
             if !plan.isEmpty {
                 text(plan, font: .systemFont(ofSize: 12),
-                     color: .secondaryLabelColor.withAlphaComponent(alpha), in: frame, aligned: .right, baselineFromTop: 5)
+                     color: .secondaryLabelColor, in: frame, aligned: .right, baselineFromTop: 5)
             }
 
         case .headline(let remaining, let label):
             let big = String(format: "%.0f%%", remaining)
             let bigFont = NSFont.monospacedDigitSystemFont(ofSize: 30, weight: .semibold)
-            let bigColor = Self.color(remaining: remaining).withAlphaComponent(alpha)
+            let bigColor = Self.color(remaining: remaining)
             let bigSize = text(big, font: bigFont, color: bigColor, in: frame, aligned: .left, baselineFromTop: 2)
             let labelFrame = NSRect(x: frame.minX + bigSize.width + 8, y: frame.minY,
                                     width: frame.width - bigSize.width - 8, height: frame.height)
             text(label, font: .systemFont(ofSize: 12),
-                 color: .secondaryLabelColor.withAlphaComponent(alpha), in: labelFrame, aligned: .left, baselineFromTop: 17)
+                 color: .secondaryLabelColor, in: labelFrame, aligned: .left, baselineFromTop: 17)
 
         case .bar(let remaining):
             let track = NSRect(x: frame.minX, y: frame.midY - Metrics.barHeight / 2,
                                width: frame.width, height: Metrics.barHeight)
-            bar(track, remaining: remaining, alpha: alpha)
+            bar(track, remaining: remaining)
 
         case .status(let left, let level, let right):
             let leftColor: NSColor
@@ -250,32 +260,32 @@ final class UsageMenuView: NSView {
             default:         leftColor = .secondaryLabelColor
             }
             text(left, font: .systemFont(ofSize: 11, weight: level == .fine || level == nil ? .regular : .medium),
-                 color: leftColor.withAlphaComponent(alpha), in: frame, aligned: .left, baselineFromTop: 4)
+                 color: leftColor, in: frame, aligned: .left, baselineFromTop: 4)
             text(right, font: .systemFont(ofSize: 11),
-                 color: .tertiaryLabelColor.withAlphaComponent(alpha), in: frame, aligned: .right, baselineFromTop: 4)
+                 color: .tertiaryLabelColor, in: frame, aligned: .right, baselineFromTop: 4)
 
         case .rule:
             let line = NSRect(x: frame.minX, y: frame.midY, width: frame.width, height: 1)
-            NSColor.separatorColor.withAlphaComponent(alpha).setFill()
+            NSColor.separatorColor.setFill()
             line.fill()
 
         case .limit(let row):
             text(row.title, font: .systemFont(ofSize: 12, weight: row.isActive ? .medium : .regular),
-                 color: .labelColor.withAlphaComponent(alpha), in: frame, aligned: .left, baselineFromTop: 2)
+                 color: .labelColor, in: frame, aligned: .left, baselineFromTop: 2)
             text(String(format: "%.0f%% left", row.remaining),
                  font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium),
-                 color: Self.color(remaining: row.remaining).withAlphaComponent(alpha),
+                 color: Self.color(remaining: row.remaining),
                  in: frame, aligned: .right, baselineFromTop: 2)
             if let reset = Self.resetText(row, capitalized: true) {
                 text(reset, font: .systemFont(ofSize: 11),
-                     color: .tertiaryLabelColor.withAlphaComponent(alpha), in: frame, aligned: .left, baselineFromTop: 19)
+                     color: .tertiaryLabelColor, in: frame, aligned: .left, baselineFromTop: 19)
             }
 
         case .toggle(let provider, let isExpanded, let count):
             let glyph = isExpanded ? "▾" : "▸"
             let suffix = count == 1 ? "1 model" : "\(count) models"
             text("\(glyph) Model limits · \(suffix)", font: .systemFont(ofSize: 11, weight: .medium),
-                 color: .secondaryLabelColor.withAlphaComponent(alpha), in: frame, aligned: .left, baselineFromTop: 4)
+                 color: .secondaryLabelColor, in: frame, aligned: .left, baselineFromTop: 4)
             toggleRects[provider] = frame
 
         case .note(let message):
@@ -292,8 +302,8 @@ final class UsageMenuView: NSView {
         }
     }
 
-    private func bar(_ track: NSRect, remaining: Double, alpha: CGFloat) {
-        NSColor.quaternaryLabelColor.withAlphaComponent(alpha).setFill()
+    private func bar(_ track: NSRect, remaining: Double) {
+        NSColor.quaternaryLabelColor.setFill()
         NSBezierPath(roundedRect: track, xRadius: 3, yRadius: 3).fill()
 
         let fraction = max(0, min(remaining, 100)) / 100
@@ -301,7 +311,7 @@ final class UsageMenuView: NSView {
         guard fraction > 0 else { return }
         let filledWidth = max(track.width * fraction, Metrics.barHeight)
         let filled = NSRect(x: track.minX, y: track.minY, width: filledWidth, height: track.height)
-        Self.color(remaining: remaining).withAlphaComponent(alpha).setFill()
+        Self.color(remaining: remaining).setFill()
         NSBezierPath(roundedRect: filled, xRadius: 3, yRadius: 3).fill()
     }
 
