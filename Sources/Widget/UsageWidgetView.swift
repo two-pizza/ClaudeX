@@ -1,10 +1,8 @@
 import WidgetKit
 import SwiftUI
 
-/// Shared look for all three sizes, built from one provider card.
-/// Small: the provider closest to running out, as a ring. Medium: both
-/// providers side by side, session and weekly. Large: the same with the
-/// per-model windows spelled out.
+/// Shared look for all three sizes. Small shows one ring, medium and large
+/// show bars - a small widget has no room for legible labels next to bars.
 struct UsageWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: UsageEntry
@@ -16,61 +14,62 @@ struct UsageWidgetView: View {
         case .none:
             EmptyStateView(message: "Open ClaudeX to load usage")
         case .some(let payload) where payload.isEmpty:
-            EmptyStateView(message: payload.errors.values.first ?? "No usage data yet")
+            EmptyStateView(message: payload.errors.values.first ?? "No usage data")
         case .some(let payload):
             switch family {
             case .systemSmall: SmallView(payload: payload)
-            case .systemLarge: CardsView(payload: payload, detailed: true)
-            default:           CardsView(payload: payload, detailed: false)
+            default:           BarsView(payload: payload, showAllRows: family == .systemLarge)
             }
         }
     }
 }
 
-// MARK: - Small: the provider closest to running out
+// MARK: - Small: one ring for the hottest window
 
 private struct SmallView: View {
     let payload: SharedStore.Payload
 
-    private var tightest: ProviderUsage? {
-        payload.snapshot.providers.min(by: { $0.headlineRemaining < $1.headlineRemaining })
+    private var hottest: (provider: ProviderUsage, row: UsageRow)? {
+        payload.snapshot.providers
+            .compactMap { provider in
+                provider.rows.max(by: { $0.percent < $1.percent }).map { (provider, $0) }
+            }
+            .max(by: { $0.1.percent < $1.1.percent })
     }
 
     var body: some View {
-        if let provider = tightest {
-            let stale = payload.errors[provider.id] != nil
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            if let hottest {
                 HStack {
-                    Text(provider.title).font(.caption).fontWeight(.semibold)
+                    Text(hottest.provider.title)
+                        .font(.caption).fontWeight(.semibold)
                     Spacer()
-                    if stale { StaleBadge() }
                 }
                 Spacer(minLength: 0)
-                Ring(remaining: provider.headlineRemaining)
+                Ring(percent: hottest.row.percent)
                     .frame(maxWidth: .infinity)
                 Spacer(minLength: 0)
-                Text("session left")
+                Text(hottest.row.title)
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                if let session = provider.sessionRow, let reset = ResetText.make(session) {
+                if let reset = ResetText.make(hottest.row) {
                     Text(reset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
-            .opacity(stale ? 0.55 : 1)
         }
     }
 }
 
 private struct Ring: View {
-    let remaining: Double
+    let percent: Double
 
     var body: some View {
         ZStack {
             Circle().stroke(.quaternary, lineWidth: 9)
             Circle()
-                .trim(from: 0, to: min(max(remaining, 0), 100) / 100)
-                .stroke(UsageColor.forRemaining(remaining), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .trim(from: 0, to: min(max(percent, 0), 100) / 100)
+                .stroke(UsageColor.of(percent), style: StrokeStyle(lineWidth: 9, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(Int(remaining))%")
+            Text("\(Int(percent))%")
                 .font(.system(.title3, design: .rounded)).fontWeight(.semibold)
                 .monospacedDigit()
         }
@@ -78,130 +77,69 @@ private struct Ring: View {
     }
 }
 
-// MARK: - Medium and large: one card per provider
+// MARK: - Medium and large: bars
 
-private struct CardsView: View {
+private struct BarsView: View {
     let payload: SharedStore.Payload
-    let detailed: Bool
+    let showAllRows: Bool
+
+    /// A medium widget fits about four bars; large fits everything.
+    private var providers: [ProviderUsage] {
+        guard !showAllRows else { return payload.snapshot.providers }
+        return payload.snapshot.providers.map { provider in
+            ProviderUsage(id: provider.id, title: provider.title, plan: provider.plan,
+                          rows: Array(provider.rows.prefix(2)), credits: provider.credits)
+        }
+    }
 
     var body: some View {
-        let providers = payload.snapshot.providers
-        if detailed {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(providers, id: \.id) { provider in
-                    ProviderCard(provider: provider, error: payload.errors[provider.id], detailed: true)
-                }
-                Spacer(minLength: 0)
-            }
-        } else {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(providers, id: \.id) { provider in
-                    ProviderCard(provider: provider, error: payload.errors[provider.id], detailed: false)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(providers, id: \.id) { provider in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(provider.title).font(.caption).fontWeight(.semibold)
+                        Spacer()
+                        Text(provider.plan).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    ForEach(provider.rows, id: \.self) { row in
+                        BarRow(row: row)
+                    }
                 }
             }
+            Spacer(minLength: 0)
+            Text("Updated \(payload.snapshot.fetchedAt, style: .relative) ago")
+                .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
         }
     }
 }
 
-private struct ProviderCard: View {
-    let provider: ProviderUsage
-    let error: String?
-    let detailed: Bool
-
-    private var stale: Bool { error != nil }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(provider.title).font(.caption).fontWeight(.semibold)
-                Spacer(minLength: 4)
-                if stale { StaleBadge() } else {
-                    Text(provider.plan).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-
-            if let session = provider.sessionRow {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(Int(session.remaining))%")
-                        .font(.system(.title2, design: .rounded)).fontWeight(.semibold)
-                        .monospacedDigit()
-                        .foregroundStyle(UsageColor.forRemaining(session.remaining))
-                    Text(session.isSession ? "session left" : "\(session.title.lowercased()) left")
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Bar(remaining: session.remaining)
-                if let reset = ResetText.make(session) {
-                    Text(reset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                }
-            }
-
-            if let weekly = provider.weeklyRow {
-                LimitLine(row: weekly)
-            }
-            if detailed {
-                ForEach(provider.modelRows, id: \.self) { row in
-                    LimitLine(row: row).padding(.leading, 8)
-                }
-            }
-
-            Text(footer)
-                .font(.caption2)
-                .foregroundStyle(stale ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
-                .lineLimit(1)
-        }
-        .opacity(stale ? 0.6 : 1)
-    }
-
-    private var footer: String {
-        let when = RelativeStamp.make(provider.fetchedAt)
-        return stale ? "Stale · last update \(when)" : "Updated \(when)"
-    }
-}
-
-private struct LimitLine: View {
+private struct BarRow: View {
     let row: UsageRow
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(row.title).font(.caption2).lineLimit(1)
-            Spacer(minLength: 4)
-            Text("\(Int(row.remaining))% left")
-                .font(.caption2).fontWeight(.medium).monospacedDigit()
-                .foregroundStyle(UsageColor.forRemaining(row.remaining))
-        }
-    }
-}
-
-private struct Bar: View {
-    let remaining: Double
-
-    var body: some View {
-        GeometryReader { geometry in
-            let fraction = min(max(remaining, 0), 100) / 100
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                if fraction > 0 {
-                    // Anything left keeps a visible sliver; nothing left draws nothing.
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(row.title).font(.caption2).lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(Int(row.percent))%")
+                    .font(.caption2).fontWeight(.medium).monospacedDigit()
+                    .foregroundStyle(UsageColor.of(row.percent))
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
                     Capsule()
-                        .fill(UsageColor.forRemaining(remaining))
-                        .frame(width: max(geometry.size.width * fraction, 5))
+                        .fill(UsageColor.of(row.percent))
+                        // Keep a sliver visible at 1%, same as the menu bar panel.
+                        .frame(width: max(geometry.size.width * min(max(row.percent, 0), 100) / 100, 5))
                 }
             }
+            .frame(height: 5)
         }
-        .frame(height: 5)
     }
 }
 
 // MARK: - Shared pieces
-
-private struct StaleBadge: View {
-    var body: some View {
-        Text("STALE")
-            .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(.orange)
-    }
-}
 
 private struct EmptyStateView: View {
     let message: String
@@ -219,22 +157,11 @@ private struct EmptyStateView: View {
 }
 
 enum UsageColor {
-    static func forRemaining(_ remaining: Double) -> Color {
-        switch RemainingLevel(remaining: remaining) {
-        case .critical: return .red
-        case .low:      return .orange
-        case .fine:     return .blue
-        }
-    }
-}
-
-enum RelativeStamp {
-    static func make(_ date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
-        switch seconds {
-        case ..<60:   return "just now"
-        case ..<3600: return "\(seconds / 60) min ago"
-        default:      return "\(seconds / 3600) h ago"
+    static func of(_ percent: Double) -> Color {
+        switch percent {
+        case 90...:   return .red
+        case 75..<90: return .orange
+        default:      return .blue
         }
     }
 }
