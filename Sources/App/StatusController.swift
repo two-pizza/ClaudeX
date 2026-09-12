@@ -19,6 +19,9 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// When the last refresh cycle finished, whatever its outcome.
     private var lastAttemptAt: Date?
     private var lastFetchStarted: Date?
+    /// After a 429 the menu must not trigger another fetch for a while:
+    /// every extra request extends the limit, the timer alone is enough.
+    private var rateLimitedUntil: Date?
 
     private enum Defaults {
         static let interval = "refreshIntervalSeconds"
@@ -107,11 +110,12 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     usage.fetchedAt = Date()
                     self.providers[id] = usage
                     self.errors[id] = nil
-                    Log.write("\(id): ok, session \(Int(usage.headlineRemaining))% left, tightest \(Int(usage.tightestRemaining))%")
+                    Log.write("\(id): ok, \(usage.headlineLabel) \(Int(usage.headlineRemaining))%, tightest \(Int(usage.tightestRemaining))%")
                 case .failure(let error):
                     // Keep the old numbers and their old timestamp; the panel
                     // marks them stale instead of pretending they are new.
                     self.errors[id] = error.localizedDescription
+                    if case .rateLimited = error { self.rateLimitedUntil = Date().addingTimeInterval(5 * 60) }
                     Log.write("\(id): failed - \(error.localizedDescription)")
                 }
             }
@@ -162,7 +166,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         var lines = snapshot.providers.map { provider -> String in
-            var line = "\(provider.title): \(Int(provider.headlineRemaining))% of session left"
+            var line = "\(provider.title): \(Int(provider.headlineRemaining))% \(provider.headlineLabel)"
             if let weekly = provider.weeklyRow { line += ", \(Int(weekly.remaining))% of week" }
             if errors[provider.id] != nil { line += " (stale)" }
             return line
@@ -273,7 +277,9 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatePanel()
         // Refresh on open only when the data is stale: the usage endpoints
         // rate-limit aggressively (429) if polled on every click.
-        if let lastAttemptAt, Date().timeIntervalSince(lastAttemptAt) < 60 { } else { refresh() }
+        let recent = lastAttemptAt.map { Date().timeIntervalSince($0) < 60 } ?? false
+        let backingOff = rateLimitedUntil.map { Date() < $0 } ?? false
+        if !recent && !backingOff { refresh() }
         for item in menu.items {
             switch item.title {
             case ItemTitle.compact: item.state = isCompact ? .on : .off

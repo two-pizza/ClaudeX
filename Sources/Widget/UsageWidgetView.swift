@@ -49,9 +49,9 @@ private struct SmallView: View {
                 Ring(remaining: provider.headlineRemaining)
                     .frame(maxWidth: .infinity)
                 Spacer(minLength: 0)
-                Text("session left")
+                Text(provider.headlineLabel)
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                if let session = provider.sessionRow, let reset = ResetText.make(session) {
+                if let headline = provider.headlineRow, let reset = ResetText.make(headline) {
                     Text(reset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
@@ -121,27 +121,30 @@ private struct ProviderCard: View {
                 }
             }
 
-            if let session = provider.sessionRow {
+            if let headline = provider.headlineRow {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(Int(session.remaining))%")
+                    Text("\(Int(headline.remaining))%")
                         .font(.system(.title2, design: .rounded)).fontWeight(.semibold)
                         .monospacedDigit()
-                        .foregroundStyle(UsageColor.forRemaining(session.remaining))
-                    Text(session.isSession ? "session left" : "\(session.title.lowercased()) left")
+                        .foregroundStyle(UsageColor.forRemaining(headline.remaining))
+                    Text(provider.headlineLabel)
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Bar(remaining: session.remaining)
-                if let reset = ResetText.make(session) {
+                Bar(remaining: headline.remaining)
+                if let reset = ResetText.make(headline) {
                     Text(reset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
 
-            if let weekly = provider.weeklyRow {
-                LimitLine(row: weekly)
+            ForEach(provider.primaryRows, id: \.self) { row in
+                LimitLine(row: row)
             }
             if detailed {
                 ForEach(provider.modelRows, id: \.self) { row in
                     LimitLine(row: row).padding(.leading, 8)
+                }
+                if let credits = provider.credits {
+                    Text(credits).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
 

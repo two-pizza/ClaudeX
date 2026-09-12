@@ -75,19 +75,19 @@ final class UsageMenuView: NSView {
 
             add(.header(title: provider.title, plan: provider.plan))
 
-            if let session = provider.sessionRow {
-                let label = session.isSession ? "session left" : "\(session.title.lowercased()) left"
-                add(.headline(remaining: session.remaining, label: label))
-                add(.bar(remaining: session.remaining))
-                add(.status(left: Self.statusText(for: session),
-                            leftLevel: RemainingLevel(remaining: session.remaining),
-                            right: Self.resetText(session, capitalized: true) ?? ""))
+            if let headline = provider.headlineRow {
+                add(.headline(remaining: headline.remaining, label: provider.headlineLabel))
+                add(.bar(remaining: headline.remaining))
+                add(.status(left: Self.statusText(for: headline),
+                            leftLevel: RemainingLevel(remaining: headline.remaining),
+                            right: Self.resetText(headline, capitalized: true) ?? ""))
             }
 
-            if let weekly = provider.weeklyRow {
+            let primary = provider.primaryRows
+            let models = provider.modelRows
+            if !primary.isEmpty || !models.isEmpty {
                 add(.rule)
-                add(.limit(weekly))
-                let models = provider.modelRows
+                primary.forEach { add(.limit($0)) }
                 if !models.isEmpty {
                     let isOpen = expanded.contains(provider.id)
                     add(.toggle(provider: provider.id, expanded: isOpen, count: models.count))
@@ -342,7 +342,10 @@ final class UsageMenuView: NSView {
     }
 
     private static func statusText(for row: UsageRow) -> String {
-        let what = row.isSession ? "Session" : row.title
+        let what: String
+        if row.isSession { what = "Session" }
+        else if row.title == "All models" || row.title == "Weekly" { what = "Weekly window" }
+        else { what = row.title }
         switch RemainingLevel(remaining: row.remaining) {
         case .critical: return row.remaining <= 0 ? "\(what) used up" : "\(what) almost used up"
         case .low:      return "\(what) running low"

@@ -26,6 +26,7 @@ if CommandLine.arguments.contains("--test-login-item") {
 
 // Diagnostic mode: one fetch per provider, print the result, exit. Tokens are never printed.
 if CommandLine.arguments.contains("--diagnose") {
+    RawCapture.enabled = CommandLine.arguments.contains("--raw")
     let done = DispatchSemaphore(value: 0)
     var pending = 1 + (CodexProvider.isInstalled ? 1 : 0)
     let lock = NSLock()

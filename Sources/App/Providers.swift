@@ -22,7 +22,7 @@ enum HTTPClient {
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 switch http.statusCode {
                 case 401, 403: completion(.failure(.unauthorized("re-login and retry")))
-                case 429:      completion(.failure(.transport("Rate limited - will retry on the next tick")))
+                case 429:      completion(.failure(.rateLimited))
                 default:       completion(.failure(.http(http.statusCode)))
                 }
                 return
@@ -30,6 +30,17 @@ enum HTTPClient {
             guard let data else { completion(.failure(.malformedResponse)); return }
             completion(.success(data))
         }.resume()
+    }
+}
+
+/// `--diagnose --raw`: print response bodies so a parsing gap can be seen.
+/// Bodies carry usage numbers only - tokens travel in request headers.
+enum RawCapture {
+    static var enabled = false
+    static func dump(_ name: String, _ data: Data) {
+        guard enabled else { return }
+        print("--- \(name) raw response ---")
+        print(String(decoding: data, as: UTF8.self))
     }
 }
 
@@ -102,6 +113,7 @@ enum ClaudeProvider {
 
         HTTPClient.get(request) { result in
             completion(result.flatMap { data in
+                RawCapture.dump("Claude", data)
                 guard let decoded = try? decoder.decode(Response.self, from: data) else {
                     return .failure(.malformedResponse)
                 }
@@ -193,8 +205,14 @@ enum CodexProvider {
             let primaryWindow: Window?
             let secondaryWindow: Window?
         }
+        struct Credits: Decodable {
+            let hasCredits: Bool?
+            let unlimited: Bool?
+            let balance: String?
+        }
         let planType: String?
         let rateLimit: RateLimit?
+        let credits: Credits?
     }
 
     private static let decoder: JSONDecoder = {
@@ -224,6 +242,7 @@ enum CodexProvider {
 
         HTTPClient.get(request) { result in
             completion(result.flatMap { data in
+                RawCapture.dump("Codex", data)
                 guard let decoded = try? decoder.decode(Response.self, from: data) else {
                     return .failure(.malformedResponse)
                 }
@@ -243,7 +262,17 @@ enum CodexProvider {
         }
 
         let plan = (response.planType ?? "").isEmpty ? "ChatGPT" : response.planType!.capitalized
-        return ProviderUsage(id: "codex", title: "Codex", plan: plan, rows: rows, credits: nil)
+
+        // Credits are the buffer past the plan limits; show the balance when there is one.
+        var credits: String? = nil
+        if let c = response.credits, c.hasCredits == true {
+            if c.unlimited == true {
+                credits = "Credits: unlimited"
+            } else if let balance = c.balance.flatMap(Double.init) {
+                credits = String(format: "Credits: %.2f left", balance)
+            }
+        }
+        return ProviderUsage(id: "codex", title: "Codex", plan: plan, rows: rows, credits: credits)
     }
 
     private static func row(window: Response.Window, percent: Double) -> UsageRow {

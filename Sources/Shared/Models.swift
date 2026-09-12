@@ -33,20 +33,35 @@ struct ProviderUsage: Codable, Hashable {
     /// One letter for the menu bar: "C 88% · X 68%".
     var shortLabel: String { id == "codex" ? "X" : "C" }
 
-    /// The 5-hour window - the number that runs out first in practice. When a
-    /// provider reports no session window (Codex does that at times) the first
-    /// window takes the headline instead, and is then not repeated below it.
-    var sessionRow: UsageRow? { rows.first(where: \.isSession) ?? rows.first }
-    /// The overall weekly window ("All models" for Claude, "Weekly" for Codex).
-    var weeklyRow: UsageRow? { rows.first(where: { !$0.isSession && $0 != sessionRow }) }
+    /// The window that limits you right now. Claude marks it (`is_active`);
+    /// otherwise it is whichever window has the least left. This is the
+    /// headline of the card, the number in the menu bar and the ring.
+    var headlineRow: UsageRow? {
+        rows.first(where: \.isActive) ?? rows.min(by: { $0.remaining < $1.remaining })
+    }
+    /// "session left", "weekly left", "Fable left" - what the headline is about.
+    var headlineLabel: String {
+        guard let row = headlineRow else { return "" }
+        if row.isSession { return "session left" }
+        if row.title == "All models" || row.title == "Weekly" { return "weekly left" }
+        return "\(row.title) left"
+    }
+    /// The other main windows - session and overall weekly - listed under the headline.
+    var primaryRows: [UsageRow] {
+        var out: [UsageRow] = []
+        if let session = rows.first(where: \.isSession), session != headlineRow { out.append(session) }
+        if let weekly = rows.first(where: { !$0.isSession && $0 != headlineRow }) { out.append(weekly) }
+        return out
+    }
     /// Per-model weekly windows, collapsed behind "Model limits" in the panel.
     var modelRows: [UsageRow] {
-        guard let weeklyRow else { return [] }
-        return rows.filter { !$0.isSession && $0 != weeklyRow && $0 != sessionRow }
+        rows.filter { $0 != headlineRow && !primaryRows.contains($0) }
     }
+    /// The overall weekly window, for the tooltip.
+    var weeklyRow: UsageRow? { rows.first(where: { !$0.isSession }) }
 
-    /// What is left of the session - the headline number for this provider.
-    var headlineRemaining: Double { sessionRow?.remaining ?? tightestRemaining }
+    /// What is left of the limiting window - the headline number for this provider.
+    var headlineRemaining: Double { headlineRow?.remaining ?? 100 }
     /// The window closest to running out, across all of them.
     var tightestRemaining: Double { rows.map(\.remaining).min() ?? 100 }
 
@@ -87,6 +102,7 @@ enum UsageError: LocalizedError {
     case unauthorized(String)
     case http(Int)
     case transport(String)
+    case rateLimited
     case malformedResponse
 
     var errorDescription: String? {
@@ -97,6 +113,7 @@ enum UsageError: LocalizedError {
         case .unauthorized(let fix): return "Token rejected - \(fix)"
         case .http(let code):        return "Server returned \(code)"
         case .transport(let m):      return m
+        case .rateLimited:           return "Rate limited - keeping the last numbers, retrying on the next tick"
         case .malformedResponse:     return "Could not parse server response"
         }
     }
