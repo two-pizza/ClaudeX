@@ -22,7 +22,7 @@ enum HTTPClient {
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 switch http.statusCode {
                 case 401, 403: completion(.failure(.unauthorized("re-login and retry")))
-                case 429:      completion(.failure(.transport("Rate limited - will retry on the next tick")))
+                case 429:      completion(.failure(.rateLimited))
                 default:       completion(.failure(.http(http.statusCode)))
                 }
                 return
@@ -193,8 +193,14 @@ enum CodexProvider {
             let primaryWindow: Window?
             let secondaryWindow: Window?
         }
+        struct Credits: Decodable {
+            let hasCredits: Bool?
+            let unlimited: Bool?
+            let balance: String?
+        }
         let planType: String?
         let rateLimit: RateLimit?
+        let credits: Credits?
     }
 
     private static let decoder: JSONDecoder = {
@@ -243,7 +249,16 @@ enum CodexProvider {
         }
 
         let plan = (response.planType ?? "").isEmpty ? "ChatGPT" : response.planType!.capitalized
-        return ProviderUsage(id: "codex", title: "Codex", plan: plan, rows: rows, credits: nil)
+        return ProviderUsage(id: "codex", title: "Codex", plan: plan, rows: rows,
+                             credits: creditsLine(response.credits))
+    }
+
+    /// Credits cover usage past the plan limits; show the balance when there is one.
+    private static func creditsLine(_ credits: Response.Credits?) -> String? {
+        guard let credits, credits.hasCredits == true else { return nil }
+        if credits.unlimited == true { return "Credits: unlimited" }
+        guard let balance = credits.balance.flatMap(Double.init) else { return nil }
+        return String(format: "Credits: %.2f left", balance)
     }
 
     private static func row(window: Response.Window, percent: Double) -> UsageRow {

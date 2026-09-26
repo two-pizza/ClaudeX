@@ -14,9 +14,15 @@ Know how much of your session and weekly window is left - without opening <code>
 Exactly what Claude Code's `/usage` screen shows - live in the menu bar:
 
 - **Claude** - current 5-hour session, weekly "All models", per-model weekly windows, reset times
-- **Codex** (optional) - your ChatGPT plan's session and weekly windows
+- **Codex** (optional) - your ChatGPT plan's session and weekly windows, plus the credits balance
 
 The ring in the menu bar reflects the hottest window: blue below 75%, orange from 75%, red from 90%.
+
+When a provider cannot be refreshed, its last numbers stay on screen with an orange
+**Stale · last update N min ago** line and the reason, and the widget marks it `stale`.
+The other provider is unaffected, and "Updated" always means the last successful fetch.
+After a rate limit (HTTP 429) opening the menu stops asking again for five minutes -
+every extra request would extend the limit - while the regular timer keeps running.
 
 ## Install
 

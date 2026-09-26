@@ -21,6 +21,8 @@ final class UsageMenuView: NSView {
         case header(title: String, trailing: String)
         case row(UsageRow)
         case note(String)
+        /// Same line as a note, drawn in orange: the numbers above it are old.
+        case warning(String)
         case footer(String)
         case divider
     }
@@ -36,13 +38,17 @@ final class UsageMenuView: NSView {
             items.append(.header(title: provider.title, trailing: provider.plan))
             items.append(contentsOf: provider.rows.map { Element.row($0) })
             if let credits = provider.credits { items.append(.note(credits)) }
-            if let error = errors[provider.id] { items.append(.note(error)) }
+            if let error = errors[provider.id] {
+                let when = provider.fetchedAt.map { Self.relativeStamp($0) } ?? "earlier"
+                items.append(.warning("Stale · last update \(when)"))
+                items.append(.note(error))
+            }
         }
         for (id, message) in errors where !snapshot.providers.contains(where: { $0.id == id }) {
             items.append(.note("\(id.capitalized): \(message)"))
         }
         if items.isEmpty { items.append(.note("No data yet")) }
-        items.append(.footer("Updated \(Self.relativeStamp(snapshot.fetchedAt))"))
+        items.append(.footer("Updated \(Self.relativeStamp(snapshot.lastSuccessAt))"))
         apply(items)
     }
 
@@ -57,7 +63,7 @@ final class UsageMenuView: NSView {
         switch element {
         case .header:  return Metrics.headerHeight
         case .row:     return Metrics.rowHeight
-        case .note:    return Metrics.noteHeight
+        case .note, .warning: return Metrics.noteHeight
         case .footer:  return Metrics.footerHeight
         case .divider: return Metrics.dividerHeight
         }
@@ -87,6 +93,9 @@ final class UsageMenuView: NSView {
             case .note(let text):
                 draw(text, font: .systemFont(ofSize: 11),
                      color: .secondaryLabelColor, in: frame, aligned: .left, baselineFromTop: 4)
+            case .warning(let text):
+                draw(text, font: .systemFont(ofSize: 11),
+                     color: .systemOrange, in: frame, aligned: .left, baselineFromTop: 4)
             case .footer(let text):
                 draw(text, font: .systemFont(ofSize: 11),
                      color: .tertiaryLabelColor, in: frame, aligned: .left, baselineFromTop: 6)

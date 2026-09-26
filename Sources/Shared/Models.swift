@@ -18,6 +18,11 @@ struct ProviderUsage: Codable, Hashable {
     let plan: String
     let rows: [UsageRow]
     let credits: String?
+    /// When these numbers were last fetched successfully. Tracked per provider:
+    /// a failed fetch keeps the old numbers AND their old time, so the panel
+    /// never says "just now" over data it did not get. Optional so a snapshot
+    /// written by 1.2.1 still decodes in the widget.
+    var fetchedAt: Date? = nil
 
     var hottestPercent: Double { rows.map(\.percent).max() ?? 0 }
 }
@@ -25,9 +30,17 @@ struct ProviderUsage: Codable, Hashable {
 /// Everything the status item needs to render.
 struct CombinedSnapshot: Codable, Hashable {
     let providers: [ProviderUsage]
+    /// When the last refresh cycle ran, successful or not.
     let fetchedAt: Date
 
     var headlinePercent: Double { providers.map(\.hottestPercent).max() ?? 0 }
+
+    /// Time of the newest successful fetch - what the "Updated" line means.
+    /// A provider whose own fetch failed is marked stale separately, so a
+    /// fresh Claude next to a stale Codex reads correctly on both counts.
+    var lastSuccessAt: Date {
+        providers.compactMap(\.fetchedAt).max() ?? fetchedAt
+    }
 }
 
 #if !WIDGET_TARGET
@@ -38,6 +51,7 @@ enum UsageError: LocalizedError {
     case unauthorized(String)
     case http(Int)
     case transport(String)
+    case rateLimited
     case malformedResponse
 
     var errorDescription: String? {
@@ -48,6 +62,7 @@ enum UsageError: LocalizedError {
         case .unauthorized(let fix): return "Token rejected - \(fix)"
         case .http(let code):        return "Server returned \(code)"
         case .transport(let m):      return m
+        case .rateLimited:           return "Rate limited - retrying later"
         case .malformedResponse:     return "Could not parse server response"
         }
     }

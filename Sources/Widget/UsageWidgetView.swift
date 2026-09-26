@@ -44,6 +44,7 @@ private struct SmallView: View {
                     Text(hottest.provider.title)
                         .font(.caption).fontWeight(.semibold)
                     Spacer()
+                    if payload.errors[hottest.provider.id] != nil { StaleMark() }
                 }
                 Spacer(minLength: 0)
                 Ring(percent: hottest.row.percent)
@@ -99,7 +100,11 @@ private struct BarsView: View {
                     HStack {
                         Text(provider.title).font(.caption).fontWeight(.semibold)
                         Spacer()
-                        Text(provider.plan).font(.caption2).foregroundStyle(.secondary)
+                        if payload.errors[provider.id] != nil {
+                            StaleMark()
+                        } else {
+                            Text(provider.plan).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                     ForEach(provider.rows, id: \.self) { row in
                         BarRow(row: row)
@@ -107,7 +112,7 @@ private struct BarsView: View {
                 }
             }
             Spacer(minLength: 0)
-            Text("Updated \(payload.snapshot.fetchedAt, style: .relative) ago")
+            Text("Updated \(payload.snapshot.lastSuccessAt, style: .relative) ago")
                 .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
         }
     }
@@ -128,10 +133,13 @@ private struct BarRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.quaternary)
-                    Capsule()
-                        .fill(UsageColor.of(row.percent))
-                        // Keep a sliver visible at 1%, same as the menu bar panel.
-                        .frame(width: max(geometry.size.width * min(max(row.percent, 0), 100) / 100, 5))
+                    if row.percent > 0 {
+                        Capsule()
+                            .fill(UsageColor.of(row.percent))
+                            // A sliver stays visible at 1%, but an unused window draws
+                            // nothing, same as the menu bar panel.
+                            .frame(width: max(geometry.size.width * min(row.percent, 100) / 100, 5))
+                    }
                 }
             }
             .frame(height: 5)
@@ -140,6 +148,13 @@ private struct BarRow: View {
 }
 
 // MARK: - Shared pieces
+
+/// The app could not refresh this provider; its numbers are from an earlier fetch.
+private struct StaleMark: View {
+    var body: some View {
+        Text("stale").font(.caption2).fontWeight(.medium).foregroundStyle(.orange)
+    }
+}
 
 private struct EmptyStateView: View {
     let message: String

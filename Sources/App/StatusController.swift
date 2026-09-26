@@ -14,8 +14,14 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Last good result per provider - one provider failing must not blank the other.
     private var providers: [String: ProviderUsage] = [:]
     private var errors: [String: String] = [:]
+    /// When the last refresh cycle finished, whatever its outcome. Drives the
+    /// menu-open throttle only; what the user sees as "Updated" is the time of
+    /// each provider's last SUCCESS (ProviderUsage.fetchedAt).
     private var fetchedAt: Date?
     private var lastFetchStarted: Date?
+    /// After a 429 opening the menu must not fetch again for a while: every
+    /// extra request extends the limit, and the timer alone is enough.
+    private var rateLimitedUntil: Date?
 
     private enum Defaults {
         static let interval = "refreshIntervalSeconds"
@@ -100,12 +106,18 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             for (id, result) in fresh {
                 switch result {
-                case .success(let usage):
+                case .success(var usage):
+                    usage.fetchedAt = Date()
                     self.providers[id] = usage
                     self.errors[id] = nil
                     Log.write("\(id): ok, hottest \(Int(usage.hottestPercent))%")
                 case .failure(let error):
+                    // Keep the last good numbers and their original time: the
+                    // panel marks them stale instead of calling them fresh.
                     self.errors[id] = error.localizedDescription
+                    if case .rateLimited = error {
+                        self.rateLimitedUntil = Date().addingTimeInterval(5 * 60)
+                    }
                     Log.write("\(id): failed - \(error.localizedDescription)")
                 }
             }
@@ -256,7 +268,9 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatePanel()
         // Refresh on open only when the data is stale: the usage endpoints
         // rate-limit aggressively (429) if polled on every click.
-        if let fetchedAt, Date().timeIntervalSince(fetchedAt) < 60 { } else { refresh() }
+        let recent = fetchedAt.map { Date().timeIntervalSince($0) < 60 } ?? false
+        let backingOff = rateLimitedUntil.map { Date() < $0 } ?? false
+        if !recent && !backingOff { refresh() }
         for item in menu.items {
             switch item.title {
             case ItemTitle.compact: item.state = isCompact ? .on : .off
