@@ -6,3 +6,7 @@ build/
 *.xcodeproj
 xcuserdata/
 DerivedData/
+
+# SwiftPM offline policy tests
+.build/
+.swiftpm/

@@ -24,31 +24,8 @@ if CommandLine.arguments.contains("--test-login-item") {
     exit(0)
 }
 
-// Diagnostic mode: one fetch per provider, print the result, exit. Tokens are never printed.
+// Diagnostic mode uses the same persisted gates as the menu bar app.
 if CommandLine.arguments.contains("--diagnose") {
-    let done = DispatchSemaphore(value: 0)
-    var pending = 1 + (CodexProvider.isInstalled ? 1 : 0)
-    let lock = NSLock()
-    func finish() {
-        lock.lock(); pending -= 1; let left = pending; lock.unlock()
-        if left == 0 { done.signal() }
-    }
-
-    func report(_ name: String, _ result: Result<ProviderUsage, UsageError>) {
-        switch result {
-        case .success(let usage):
-            print("\(name): ok, plan \(usage.plan)")
-            for row in usage.rows {
-                let reset = row.resetsAt.map { " (resets \($0))" } ?? ""
-                print("  \(row.title): \(row.percent)%\(reset)")
-            }
-            if let credits = usage.credits { print("  \(credits)") }
-        case .failure(let error):
-            print("\(name): FAILED - \(error.localizedDescription)")
-        }
-        finish()
-    }
-
     // The App Group is easy to break silently: a wrong team id yields a
     // valid-looking build whose widget never receives anything.
     print("App Group: \(SharedStore.appGroup)")
@@ -69,9 +46,26 @@ if CommandLine.arguments.contains("--diagnose") {
         print("  (check DEVELOPMENT_TEAM in Team.xcconfig)")
     }
 
-    ClaudeProvider.fetch { report("Claude", $0) }
-    if CodexProvider.isInstalled { CodexProvider.fetch { report("Codex", $0) } }
-    _ = done.wait(timeout: .now() + 40)
+    let coordinator = RefreshCoordinator(
+        fetchers: ["claude": ClaudeProvider.fetch, "codex": CodexProvider.fetch], log: { print($0) })
+    let selected = UserDefaults.standard.double(forKey: "refreshIntervalSeconds")
+    let showCodex = CodexProvider.isInstalled
+        && (UserDefaults.standard.object(forKey: "showCodex") as? Bool ?? true)
+    coordinator.refresh(trigger: .diagnostic, interval: selected, showCodex: showCodex)
+    let deadline = Date().addingTimeInterval(65)
+    while coordinator.hasRequestsInFlight && Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    }
+    for usage in coordinator.snapshot.providers {
+        print("\(usage.title): ok, plan \(usage.plan)")
+        for row in usage.rows {
+            let reset = row.resetsAt.map { " (resets \($0))" } ?? ""
+            print("  \(row.title): \(row.percent)%\(reset)")
+        }
+        if let credits = usage.credits { print("  \(credits)") }
+    }
+    for (id, error) in coordinator.errors { print("\(id): \(error)") }
+    for (id, status) in coordinator.statuses { print("\(id): \(status.text(now: Date()))") }
     exit(0)
 }
 

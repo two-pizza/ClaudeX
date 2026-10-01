@@ -112,8 +112,10 @@ private struct BarsView: View {
                 }
             }
             Spacer(minLength: 0)
-            Text("Updated \(payload.snapshot.lastSuccessAt, style: .relative) ago")
-                .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+            if let success = payload.snapshot.lastSuccessAt {
+                Text("Updated \(success, style: .relative) ago")
+                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+            }
         }
     }
 }

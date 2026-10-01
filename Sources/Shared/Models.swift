@@ -38,8 +38,8 @@ struct CombinedSnapshot: Codable, Hashable {
     /// Time of the newest successful fetch - what the "Updated" line means.
     /// A provider whose own fetch failed is marked stale separately, so a
     /// fresh Claude next to a stale Codex reads correctly on both counts.
-    var lastSuccessAt: Date {
-        providers.compactMap(\.fetchedAt).max() ?? fetchedAt
+    var lastSuccessAt: Date? {
+        providers.compactMap(\.fetchedAt).max()
     }
 }
 
@@ -51,7 +51,7 @@ enum UsageError: LocalizedError {
     case unauthorized(String)
     case http(Int)
     case transport(String)
-    case rateLimited
+    case rateLimited(retryAfter: Date?)
     case malformedResponse
 
     var errorDescription: String? {
@@ -62,7 +62,7 @@ enum UsageError: LocalizedError {
         case .unauthorized(let fix): return "Token rejected - \(fix)"
         case .http(let code):        return "Server returned \(code)"
         case .transport(let m):      return m
-        case .rateLimited:           return "Rate limited - retrying later"
+        case .rateLimited:           return "Last request was rate limited"
         case .malformedResponse:     return "Could not parse server response"
         }
     }

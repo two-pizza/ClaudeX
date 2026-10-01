@@ -21,8 +21,13 @@ The ring in the menu bar reflects the hottest window: blue below 75%, orange fro
 When a provider cannot be refreshed, its last numbers stay on screen with an orange
 **Stale · last update N min ago** line and the reason, and the widget marks it `stale`.
 The other provider is unaffected, and "Updated" always means the last successful fetch.
-After a rate limit (HTTP 429) opening the menu stops asking again for five minutes -
-every extra request would extend the limit - while the regular timer keeps running.
+All refresh sources respect a separate schedule for each provider. Claude is polled
+at most once every five minutes (or the selected interval, if longer); Codex follows
+the selected interval. The interval submenu shows both effective values.
+HTTP 429 pauses only the affected provider: a valid `Retry-After` takes precedence,
+otherwise retries wait 5, 10, 20, then 30 minutes until a successful fetch.
+Pauses and request times survive restarts. Manual refresh explains any wait in the
+panel; a request already in progress cannot overlap another for the same provider.
 
 ## Install
 
@@ -92,16 +97,26 @@ Keychain item it reads. The widget extension is sandboxed, as macOS requires.
 
 | Item | |
 |---|---|
-| **Refresh now** (⌘R) | fetch immediately; also refreshes on menu open and on wake from sleep |
-| **Refresh every** | 1 / 2 / 5 / 15 minutes (default 2) |
+| **Refresh now** (⌘R) | refresh eligible providers; show the reason and deadline for any wait |
+| **Refresh every** | 1 / 2 / 5 / 15 minutes (default 2); Claude minimum 5 minutes |
 | **Compact** | ring only, no percentages |
 | **Show Codex usage** | hide/show the Codex section |
 | **Launch at login** | via `SMAppService` |
 
+## Test without network or credentials
+
+```bash
+swift test
+./build.sh  # build only; does not install or launch the app
+```
+
+The tests use isolated UserDefaults suites, a controllable clock, fake providers,
+and URLProtocol responses. They never read CLI credentials or call usage endpoints.
+
 ## Troubleshooting
 
 ```bash
-# one fetch per provider, printed to the console (tokens never printed)
+# refresh eligible providers; print results or waiting status (tokens never printed)
 ~/Applications/ClaudeX.app/Contents/MacOS/ClaudeX --diagnose
 
 # runtime log
@@ -113,7 +128,7 @@ tail -f ~/Library/Logs/ClaudeX.log
 | `—` in the menu bar | first fetch failed; it retries automatically |
 | "not logged in" | run `claude` (or `codex`) once and authenticate |
 | "Token rejected" | same - the CLI refreshes its token on next run |
-| "Rate limited" | the usage endpoint throttled us; next tick recovers |
+| "Rate limited" | the usage endpoint throttled us; the panel shows when another attempt is allowed |
 
 ## Code layout
 
@@ -122,6 +137,9 @@ tail -f ~/Library/Logs/ClaudeX.log
 | `Sources/Shared/Models.swift` | shared data model for both providers |
 | `Sources/App/Keychain.swift` | Claude Code token from the Keychain |
 | `Sources/App/Providers.swift` | Claude + Codex fetch and response parsing |
+| `Sources/App/HTTPClient.swift` | transport retries and Retry-After parsing |
+| `Sources/App/RefreshCoordinator.swift` | per-provider scheduling and persisted backoff |
+| `Sources/App/UsagePanelContent.swift` | testable panel text and freshness |
 | `Sources/App/UsageMenuView.swift` | the panel with limit bars |
 | `Sources/App/StatusController.swift` | status item, ring icon, timer, settings |
 | `Sources/App/Log.swift` | log file in `~/Library/Logs/` |

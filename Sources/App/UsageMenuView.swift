@@ -17,39 +17,13 @@ final class UsageMenuView: NSView {
         static let barHeight: CGFloat = 6
     }
 
-    private enum Element {
-        case header(title: String, trailing: String)
-        case row(UsageRow)
-        case note(String)
-        /// Same line as a note, drawn in orange: the numbers above it are old.
-        case warning(String)
-        case footer(String)
-        case divider
-    }
-
+    private typealias Element = UsagePanelElement
     private var elements: [Element] = []
 
-    // MARK: Content
-
-    func render(snapshot: CombinedSnapshot, errors: [String: String]) {
-        var items: [Element] = []
-        for (index, provider) in snapshot.providers.enumerated() {
-            if index > 0 { items.append(.divider) }
-            items.append(.header(title: provider.title, trailing: provider.plan))
-            items.append(contentsOf: provider.rows.map { Element.row($0) })
-            if let credits = provider.credits { items.append(.note(credits)) }
-            if let error = errors[provider.id] {
-                let when = provider.fetchedAt.map { Self.relativeStamp($0) } ?? "earlier"
-                items.append(.warning("Stale · last update \(when)"))
-                items.append(.note(error))
-            }
-        }
-        for (id, message) in errors where !snapshot.providers.contains(where: { $0.id == id }) {
-            items.append(.note("\(id.capitalized): \(message)"))
-        }
-        if items.isEmpty { items.append(.note("No data yet")) }
-        items.append(.footer("Updated \(Self.relativeStamp(snapshot.lastSuccessAt))"))
-        apply(items)
+    func render(snapshot: CombinedSnapshot, errors: [String: String],
+                statuses: [String: RefreshStatus]) {
+        apply(UsagePanelContent.make(snapshot: snapshot, errors: errors,
+                                    statuses: statuses, now: Date()))
     }
 
     private func apply(_ items: [Element]) {
@@ -172,12 +146,4 @@ final class UsageMenuView: NSView {
         return "resets \(weekdayTime.string(from: resetsAt))"
     }
 
-    static func relativeStamp(_ date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
-        switch seconds {
-        case ..<60:   return "just now"
-        case ..<3600: return "\(seconds / 60) min ago"
-        default:      return "\(seconds / 3600) h ago"
-        }
-    }
 }

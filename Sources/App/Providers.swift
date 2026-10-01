@@ -1,38 +1,5 @@
 import Foundation
 
-/// Shared plumbing: request with transport-level retry.
-/// The first request after a rebuild is often cut by network filters, and the
-/// interface is not up instantly after wake - so transport failures retry.
-/// Auth failures and HTTP status codes do not: they won't fix themselves.
-enum HTTPClient {
-    static func get(_ request: URLRequest, attempt: Int = 1,
-                    completion: @escaping (Result<Data, UsageError>) -> Void) {
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error {
-                let delays: [TimeInterval] = [3, 10]
-                if attempt <= delays.count {
-                    DispatchQueue.global().asyncAfter(deadline: .now() + delays[attempt - 1]) {
-                        get(request, attempt: attempt + 1, completion: completion)
-                    }
-                    return
-                }
-                completion(.failure(.transport(error.localizedDescription)))
-                return
-            }
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                switch http.statusCode {
-                case 401, 403: completion(.failure(.unauthorized("re-login and retry")))
-                case 429:      completion(.failure(.rateLimited))
-                default:       completion(.failure(.http(http.statusCode)))
-                }
-                return
-            }
-            guard let data else { completion(.failure(.malformedResponse)); return }
-            completion(.success(data))
-        }.resume()
-    }
-}
-
 enum DateParsing {
     private static let isoWithFraction: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -100,7 +67,9 @@ enum ClaudeProvider {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
-        HTTPClient.get(request) { result in
+        HTTPClient.get(request, log: { message in
+            DispatchQueue.main.async { Log.write("claude: \(message)") }
+        }) { result in
             completion(result.flatMap { data in
                 guard let decoded = try? decoder.decode(Response.self, from: data) else {
                     return .failure(.malformedResponse)
@@ -228,7 +197,9 @@ enum CodexProvider {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
-        HTTPClient.get(request) { result in
+        HTTPClient.get(request, log: { message in
+            DispatchQueue.main.async { Log.write("codex: \(message)") }
+        }) { result in
             completion(result.flatMap { data in
                 guard let decoded = try? decoder.decode(Response.self, from: data) else {
                     return .failure(.malformedResponse)

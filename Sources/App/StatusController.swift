@@ -11,17 +11,9 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
 
-    /// Last good result per provider - one provider failing must not blank the other.
-    private var providers: [String: ProviderUsage] = [:]
-    private var errors: [String: String] = [:]
-    /// When the last refresh cycle finished, whatever its outcome. Drives the
-    /// menu-open throttle only; what the user sees as "Updated" is the time of
-    /// each provider's last SUCCESS (ProviderUsage.fetchedAt).
-    private var fetchedAt: Date?
-    private var lastFetchStarted: Date?
-    /// After a 429 opening the menu must not fetch again for a while: every
-    /// extra request extends the limit, and the timer alone is enough.
-    private var rateLimitedUntil: Date?
+    private let coordinator = RefreshCoordinator(
+        fetchers: ["claude": ClaudeProvider.fetch, "codex": CodexProvider.fetch], log: Log.write)
+    private var intervalSummaryItem: NSMenuItem?
 
     private enum Defaults {
         static let interval = "refreshIntervalSeconds"
@@ -31,7 +23,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var refreshInterval: TimeInterval {
         let stored = UserDefaults.standard.double(forKey: Defaults.interval)
-        return stored > 0 ? stored : 120
+        return stored.isFinite && stored > 0 ? stored : 120
     }
     private var isCompact: Bool { UserDefaults.standard.bool(forKey: Defaults.compact) }
     private var showCodex: Bool {
@@ -39,16 +31,18 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return UserDefaults.standard.object(forKey: Defaults.codex) as? Bool ?? true
     }
 
-    private var snapshot: CombinedSnapshot? {
-        guard let fetchedAt else { return nil }
-        let order = ["claude", "codex"]
-        let list = order.compactMap { providers[$0] }
-        return CombinedSnapshot(providers: list, fetchedAt: fetchedAt)
-    }
+    private var snapshot: CombinedSnapshot { coordinator.snapshot }
+    private var errors: [String: String] { coordinator.errors }
 
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        coordinator.onChange = { [weak self] in
+            self?.updateStatusButton()
+            self?.updatePanel()
+            self?.restartTimer()
+        }
+        coordinator.onSnapshotChange = { [weak self] in self?.publishToWidget() }
         statusItem.button?.imagePosition = .imageLeading
         statusItem.menu = buildMenu()
         statusItem.menu?.delegate = self
@@ -59,79 +53,39 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         NSWorkspace.shared.notificationCenter.addObserver(
-            self, selector: #selector(refresh),
+            self, selector: #selector(refreshAfterWake),
             name: NSWorkspace.didWakeNotification, object: nil)
 
         updateStatusButton()
-        refresh()
+        refresh(.launch)
+        publishToWidget()
         restartTimer()
     }
 
     private func restartTimer() {
         timer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
-            self?.refresh()
+        timer = nil
+        guard let next = coordinator.nextRefreshAt else { return }
+        let delay = max(0.1, next.timeIntervalSinceNow)
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            self?.refresh(.timer)
         }
-        timer.tolerance = refreshInterval * 0.2
+        timer.tolerance = min(5, delay * 0.05)
+        RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 
     // MARK: Data
 
-    @objc private func refresh() {
-        // The menu triggers a refresh on every open - don't hammer the API.
-        if let started = lastFetchStarted, Date().timeIntervalSince(started) < 5 { return }
-        lastFetchStarted = Date()
-
-        let group = DispatchGroup()
-        var fresh: [String: Result<ProviderUsage, UsageError>] = [:]
-        let lock = NSLock()
-
-        func collect(_ id: String, _ result: Result<ProviderUsage, UsageError>) {
-            lock.lock(); fresh[id] = result; lock.unlock()
-            group.leave()
-        }
-
-        group.enter()
-        ClaudeProvider.fetch { collect("claude", $0) }
-        if showCodex {
-            group.enter()
-            CodexProvider.fetch { collect("codex", $0) }
-        } else {
-            providers["codex"] = nil
-            errors["codex"] = nil
-        }
-
-        group.notify(queue: .main) { [weak self] in
-            guard let self else { return }
-            for (id, result) in fresh {
-                switch result {
-                case .success(var usage):
-                    usage.fetchedAt = Date()
-                    self.providers[id] = usage
-                    self.errors[id] = nil
-                    Log.write("\(id): ok, hottest \(Int(usage.hottestPercent))%")
-                case .failure(let error):
-                    // Keep the last good numbers and their original time: the
-                    // panel marks them stale instead of calling them fresh.
-                    self.errors[id] = error.localizedDescription
-                    if case .rateLimited = error {
-                        self.rateLimitedUntil = Date().addingTimeInterval(5 * 60)
-                    }
-                    Log.write("\(id): failed - \(error.localizedDescription)")
-                }
-            }
-            self.fetchedAt = Date()
-            self.updateStatusButton()
-            self.updatePanel()
-            self.publishToWidget()
-        }
+    private func refresh(_ trigger: RefreshTrigger) {
+        coordinator.refresh(trigger: trigger, interval: refreshInterval, showCodex: showCodex)
     }
+
+    @objc private func refreshAfterWake() { refresh(.wake) }
 
     /// Hands the fresh numbers to the widget. No-op in builds without the
     /// App Group entitlement, so the ad-hoc build keeps working unchanged.
     private func publishToWidget() {
-        guard let snapshot else { return }
         guard SharedStore.write(snapshot: snapshot, errors: errors) else { return }
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
@@ -143,10 +97,11 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusButton() {
         guard let button = statusItem.button else { return }
 
-        guard let snapshot, !snapshot.providers.isEmpty else {
+        let snapshot = self.snapshot
+        guard !snapshot.providers.isEmpty else {
             button.image = Self.ringImage(percent: 0, color: .tertiaryLabelColor)
             button.title = errors.isEmpty ? "" : " —"
-            button.toolTip = errors.values.joined(separator: "\n")
+            button.toolTip = statusDetails
             return
         }
 
@@ -165,7 +120,15 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = snapshot.providers
             .map { "\($0.title): \(Int($0.hottestPercent))%" }
             .joined(separator: "\n")
-            + (errors.isEmpty ? "" : "\n" + errors.values.joined(separator: "\n"))
+            + (statusDetails.isEmpty ? "" : "\n" + statusDetails)
+    }
+
+    private var statusDetails: String {
+        let statuses = coordinator.statuses
+        return RefreshCoordinator.providerIDs.compactMap { id in
+            let message = statuses[id]?.text(now: Date()) ?? errors[id]
+            return message.map { "\(id.capitalized): \($0)" }
+        }.joined(separator: "\n")
     }
 
     /// Ring indicator: gray track plus a clockwise arc from 12 o'clock.
@@ -230,6 +193,11 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = refreshInterval == seconds ? .on : .off
             intervalMenu.addItem(item)
         }
+        intervalMenu.addItem(.separator())
+        let summary = NSMenuItem(title: RefreshCoordinator.intervalSummary(
+            selected: refreshInterval, showCodex: showCodex), action: nil, keyEquivalent: "")
+        intervalMenu.addItem(summary)
+        intervalSummaryItem = summary
         intervalItem.submenu = intervalMenu
         menu.addItem(intervalItem)
 
@@ -266,11 +234,9 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         updatePanel()
-        // Refresh on open only when the data is stale: the usage endpoints
-        // rate-limit aggressively (429) if polled on every click.
-        let recent = fetchedAt.map { Date().timeIntervalSince($0) < 60 } ?? false
-        let backingOff = rateLimitedUntil.map { Date() < $0 } ?? false
-        if !recent && !backingOff { refresh() }
+        refresh(.menu)
+        intervalSummaryItem?.title = RefreshCoordinator.intervalSummary(
+            selected: refreshInterval, showCodex: showCodex)
         for item in menu.items {
             switch item.title {
             case ItemTitle.compact: item.state = isCompact ? .on : .off
@@ -286,21 +252,19 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updatePanel() {
-        let current = snapshot ?? CombinedSnapshot(providers: [], fetchedAt: Date())
-        panel.render(snapshot: current, errors: errors)
+        panel.render(snapshot: snapshot, errors: errors, statuses: coordinator.statuses)
     }
 
     // MARK: Actions
 
     @objc private func refreshFromMenu() {
-        lastFetchStarted = nil
-        refresh()
+        refresh(.manual)
     }
 
     @objc private func setInterval(_ sender: NSMenuItem) {
         guard let seconds = sender.representedObject as? Double else { return }
         UserDefaults.standard.set(seconds, forKey: Defaults.interval)
-        restartTimer()
+        refresh(.settings)
     }
 
     @objc private func toggleCompact() {
@@ -310,8 +274,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleCodex() {
         UserDefaults.standard.set(!showCodex, forKey: Defaults.codex)
-        lastFetchStarted = nil
-        refresh()
+        refresh(.visibility)
     }
 
     @objc private func toggleLoginItem() {
