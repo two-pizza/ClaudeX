@@ -10,8 +10,10 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let panel = UsageMenuView()
     private var timer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
+    private var clockChangeObserver: NSObjectProtocol?
 
     private let coordinator = RefreshCoordinator(
+        cachedPayload: SharedStore.read(),
         fetchers: ["claude": ClaudeProvider.fetch, "codex": CodexProvider.fetch], log: Log.write)
     private var intervalSummaryItem: NSMenuItem?
 
@@ -55,6 +57,10 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(refreshAfterWake),
             name: NSWorkspace.didWakeNotification, object: nil)
+        clockChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSSystemClockDidChange, object: nil, queue: .main) { [weak self] _ in
+                self?.refresh(.clockChange)
+            }
 
         updateStatusButton()
         refresh(.launch)

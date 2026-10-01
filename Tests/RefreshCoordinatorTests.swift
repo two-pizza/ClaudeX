@@ -20,7 +20,7 @@ final class RefreshCoordinatorTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
     }
 
-    private func make() -> RefreshCoordinator {
+    private func make(cachedPayload: SharedStore.Payload? = nil) -> RefreshCoordinator {
         var fetchers: [String: RefreshCoordinator.Fetch] = [:]
         for id in RefreshCoordinator.providerIDs {
             fetchers[id] = { [unowned self] completion in
@@ -28,7 +28,8 @@ final class RefreshCoordinatorTests: XCTestCase {
                 self.pending[id] = completion
             }
         }
-        return RefreshCoordinator(defaults: defaults, now: { self.clock }, fetchers: fetchers)
+        return RefreshCoordinator(defaults: defaults, now: { self.clock },
+                                  cachedPayload: cachedPayload, fetchers: fetchers)
     }
 
     private func refresh(_ coordinator: RefreshCoordinator, _ trigger: RefreshTrigger = .timer,
@@ -279,5 +280,127 @@ final class RefreshCoordinatorTests: XCTestCase {
         refresh(c, interval: 120)
         XCTAssertEqual(calls["claude"], 2)
         XCTAssertEqual(calls["codex"], 3)
+    }
+
+    func testRestartInPauseKeepsWidgetProvidersAndOriginalSuccessTimes() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeXSnapshot-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let savedAt = clock.addingTimeInterval(-900)
+        var saved: [ProviderUsage] = []
+        for id in RefreshCoordinator.providerIDs {
+            var usage = try success(id).get()
+            usage.fetchedAt = savedAt
+            saved.append(usage)
+            let schedule = RefreshCoordinator.Schedule(lastStarted: clock,
+                blockedUntil: clock.addingTimeInterval(id == "claude" ? 1800 : 60), backoffStep: 1)
+            defaults.set(try JSONEncoder().encode(schedule), forKey: "refreshSchedule.v1.\(id)")
+        }
+        XCTAssertTrue(SharedStore.write(snapshot: CombinedSnapshot(providers: saved, fetchedAt: savedAt),
+                                        errors: [:], to: file, writtenAt: savedAt))
+        let c = make(cachedPayload: try XCTUnwrap(SharedStore.read(from: file)))
+        var writes = 0
+        func publish() {
+            writes += 1
+            XCTAssertTrue(SharedStore.write(snapshot: c.snapshot, errors: c.errors, to: file, writtenAt: clock))
+            XCTAssertEqual(SharedStore.read(from: file)?.snapshot.providers.count, 2)
+        }
+        c.onSnapshotChange = { publish() }
+        refresh(c, .launch)
+        publish() // applicationDidFinishLaunching publishes even when requests are skipped.
+        XCTAssertTrue(calls.isEmpty)
+        let restored = try XCTUnwrap(SharedStore.read(from: file))
+        XCTAssertEqual(restored.snapshot.providers, saved)
+        XCTAssertEqual(restored.snapshot.lastSuccessAt, savedAt)
+        XCTAssertNotNil(restored.errors["claude"])
+        let panel = UsagePanelContent.make(snapshot: c.snapshot, errors: c.errors,
+                                          statuses: c.statuses, now: clock)
+        XCTAssertTrue(panel.contains(.warning("Stale · last update 15 min ago")))
+        XCTAssertTrue(panel.contains(.footer("Updated 15 min ago")))
+        clock.addTimeInterval(60)
+        refresh(c)
+        finish("codex", success("codex", percent: 42))
+        let updated = try XCTUnwrap(SharedStore.read(from: file))
+        XCTAssertEqual(updated.snapshot.providers.first, saved.first)
+        XCTAssertEqual(updated.snapshot.providers.last?.rows.first?.percent, 42)
+        XCTAssertEqual(updated.snapshot.providers.last?.fetchedAt, clock)
+        XCTAssertNil(updated.errors["codex"])
+        XCTAssertGreaterThanOrEqual(writes, 3)
+    }
+
+    func testRestoredCacheRetainsErrorsWithoutInventingMissingSuccessTimes() throws {
+        let cached = SharedStore.Payload(snapshot: CombinedSnapshot(providers: [try success("claude").get()],
+                                                                    fetchedAt: clock),
+                                         errors: ["claude": "Server returned 500"], writtenAt: clock)
+        let c = make(cachedPayload: cached)
+        XCTAssertEqual(c.errors["claude"], "Server returned 500")
+        XCTAssertNil(c.snapshot.lastSuccessAt)
+        refresh(c, .launch, codex: false)
+        XCTAssertNil(c.snapshot.lastSuccessAt)
+        finish("claude", success("claude"))
+        XCTAssertEqual(c.snapshot.lastSuccessAt, clock)
+        XCTAssertNil(c.errors["claude"])
+    }
+
+    func testRestoredSuccessIsMarkedPendingAndHiddenCodexIsNotPublished() throws {
+        var claude = try success("claude").get()
+        claude.fetchedAt = clock.addingTimeInterval(-60)
+        let cached = SharedStore.Payload(snapshot: CombinedSnapshot(providers: [claude, try success("codex").get()],
+                                                                    fetchedAt: clock), errors: [:], writtenAt: clock)
+        let c = make(cachedPayload: cached)
+        refresh(c, .launch, codex: false)
+        XCTAssertEqual(c.snapshot.providers, [claude])
+        XCTAssertEqual(c.errors["claude"], "Saved data; waiting for next refresh")
+        XCTAssertNil(c.errors["codex"])
+    }
+
+    func testAbsurdServerPauseIsCappedPersistedAndStillLetsCodexRun() {
+        let c = make()
+        refresh(c)
+        finish("claude", .failure(.rateLimited(retryAfter: clock.addingTimeInterval(365 * 86400))))
+        finish("codex", success("codex"))
+        let until = clock.addingTimeInterval(86400)
+        XCTAssertEqual(c.schedule(for: "claude")?.blockedUntil, until)
+        XCTAssertEqual(make().schedule(for: "claude")?.blockedUntil, until)
+        clock.addTimeInterval(60)
+        refresh(c)
+        XCTAssertEqual(calls["claude"], 1)
+        XCTAssertEqual(calls["codex"], 2)
+        clock = until
+        refresh(c)
+        XCTAssertEqual(calls["claude"], 2)
+    }
+
+    func testRestoreNormalizesFutureDatesOnceAndDoesNotSlideDeadline() throws {
+        let future = clock.addingTimeInterval(365 * 86400)
+        let bad = RefreshCoordinator.Schedule(lastStarted: future, blockedUntil: future, backoffStep: 99)
+        defaults.set(try JSONEncoder().encode(bad), forKey: "refreshSchedule.v1.claude")
+        let repaired = RefreshCoordinator.Schedule(lastStarted: clock,
+            blockedUntil: clock.addingTimeInterval(86400), backoffStep: 4)
+        let c = make()
+        XCTAssertEqual(c.schedule(for: "claude"), repaired)
+        let data = try XCTUnwrap(defaults.data(forKey: "refreshSchedule.v1.claude"))
+        XCTAssertEqual(try JSONDecoder().decode(RefreshCoordinator.Schedule.self, from: data), repaired)
+        clock.addTimeInterval(60)
+        let restarted = make()
+        refresh(restarted, .launch, codex: false)
+        XCTAssertEqual(restarted.schedule(for: "claude"), repaired)
+        XCTAssertTrue(calls.isEmpty)
+        clock = repaired.blockedUntil
+        refresh(restarted, codex: false)
+        XCTAssertEqual(calls["claude"], 1)
+    }
+
+    func testBackwardClockChangeRepairsLiveRequestTimeAndRearmsDeadline() {
+        let c = make()
+        refresh(c, codex: false)
+        finish("claude", success("claude"))
+        clock.addTimeInterval(-86400)
+        refresh(c, .clockChange, codex: false)
+        XCTAssertEqual(c.schedule(for: "claude")?.lastStarted, clock)
+        XCTAssertEqual(c.nextRefreshAt, clock.addingTimeInterval(300))
+        XCTAssertEqual(calls["claude"], 1)
+        clock.addTimeInterval(300)
+        refresh(c, codex: false)
+        XCTAssertEqual(calls["claude"], 2)
     }
 }

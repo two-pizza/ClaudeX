@@ -1,7 +1,7 @@
 import Foundation
 
 enum RefreshTrigger: String, CaseIterable {
-    case launch, timer, wake, menu, manual, settings, visibility, diagnostic
+    case launch, timer, wake, clockChange, menu, manual, settings, visibility, diagnostic
 }
 
 enum RefreshStatus: Equatable {
@@ -36,6 +36,16 @@ final class RefreshCoordinator {
         var lastStarted: Date?
         var blockedUntil: Date?
         var backoffStep = 0
+
+        func normalized(at date: Date) -> Schedule {
+            var result = self
+            result.backoffStep = min(4, max(0, backoffStep))
+            if let lastStarted { result.lastStarted = min(lastStarted, date) }
+            if let blockedUntil {
+                result.blockedUntil = min(blockedUntil, date.addingTimeInterval(RefreshCoordinator.maximumPause))
+            }
+            return result
+        }
     }
 
     private struct State {
@@ -46,6 +56,9 @@ final class RefreshCoordinator {
     }
 
     static let providerIDs = ["claude", "codex"]
+    /// Safety bound for corrupt persisted dates and implausible server delays.
+    /// Ordinary Retry-After values above the 30-minute fallback are preserved.
+    static let maximumPause: TimeInterval = 24 * 60 * 60
     private let defaults: UserDefaults
     private let now: () -> Date
     private let fetchers: [String: Fetch]
@@ -59,17 +72,27 @@ final class RefreshCoordinator {
     var onSnapshotChange: (() -> Void)?
 
     init(defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init,
+         cachedPayload: SharedStore.Payload? = nil,
          fetchers: [String: Fetch], log: @escaping (String) -> Void = { _ in }) {
         self.defaults = defaults
         self.now = now
         self.fetchers = fetchers
         self.log = log
+        lastCompleted = cachedPayload?.snapshot.fetchedAt
+        let date = now()
         for id in Self.providerIDs {
-            var schedule = defaults.data(forKey: Self.key(id))
+            let stored = defaults.data(forKey: Self.key(id))
                 .flatMap { try? JSONDecoder().decode(Schedule.self, from: $0) } ?? Schedule()
-            schedule.backoffStep = min(4, max(0, schedule.backoffStep))
-            states[id] = State(schedule: schedule,
-                               error: schedule.backoffStep > 0 ? "Last request was rate limited" : nil)
+            let schedule = stored.normalized(at: date)
+            let usage = cachedPayload?.snapshot.providers.first { $0.id == id }
+            let cachedError = cachedPayload?.errors[id]
+                ?? (usage == nil ? nil : "Saved data; waiting for next refresh")
+            states[id] = State(schedule: schedule, usage: usage,
+                               error: schedule.backoffStep > 0 ? "Last request was rate limited" : cachedError)
+            if schedule != stored {
+                persist(id)
+                log("\(id): normalized restored request dates")
+            }
         }
     }
 
@@ -147,6 +170,17 @@ final class RefreshCoordinator {
         }
 
         let date = now()
+        // Also repair state after a clock change while this process is alive.
+        // Persist the correction once; later refreshes must not move the deadline.
+        for id in Self.providerIDs {
+            guard let stored = states[id]?.schedule else { continue }
+            let normalized = stored.normalized(at: date)
+            if normalized != stored {
+                states[id]?.schedule = normalized
+                persist(id)
+                log("\(id): normalized request dates after clock change")
+            }
+        }
         for id in enabledIDs {
             guard var state = states[id], !state.inFlight,
                   nextEligible(id).map({ $0 <= date }) ?? true,
@@ -174,6 +208,7 @@ final class RefreshCoordinator {
         precondition(Thread.isMainThread)
         guard var state = states[id], state.inFlight else { return }
         let date = now()
+        state.schedule = state.schedule.normalized(at: date)
         state.inFlight = false
         switch result {
         case .success(var usage):
@@ -189,8 +224,11 @@ final class RefreshCoordinator {
                 state.schedule.backoffStep = min(4, state.schedule.backoffStep + 1)
                 let delays: [TimeInterval] = [300, 600, 1200, 1800]
                 let serverDate = retryAfter.flatMap { $0 > date ? $0 : nil }
-                state.schedule.blockedUntil = serverDate
-                    ?? date.addingTimeInterval(delays[state.schedule.backoffStep - 1])
+                let requested = serverDate ?? date.addingTimeInterval(delays[state.schedule.backoffStep - 1])
+                state.schedule.blockedUntil = min(requested, date.addingTimeInterval(Self.maximumPause))
+                if state.schedule.blockedUntil != requested {
+                    log("\(id): Retry-After exceeds safety horizon; capped at 24 hours")
+                }
                 let source = serverDate == nil ? "fallback step \(state.schedule.backoffStep)" : "Retry-After"
                 log("\(id): rate limited; \(source); blocked until \(state.schedule.blockedUntil!)")
             } else {

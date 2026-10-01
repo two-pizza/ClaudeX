@@ -7,9 +7,8 @@ let package = Package(
     targets: [
         .target(name: "ClaudeXPolicy", path: "Sources", exclude: [
             "Widget", "App/StatusController.swift", "App/UsageMenuView.swift",
-            "App/Providers.swift", "App/Keychain.swift", "App/Log.swift", "App/main.swift",
-            "Shared/SharedStore.swift"
-        ], sources: ["Shared/Models.swift", "App/RefreshCoordinator.swift",
+            "App/Providers.swift", "App/Keychain.swift", "App/Log.swift", "App/main.swift"
+        ], sources: ["Shared/Models.swift", "Shared/SharedStore.swift", "App/RefreshCoordinator.swift",
                      "App/HTTPClient.swift", "App/UsagePanelContent.swift"]),
         .testTarget(name: "ClaudeXPolicyTests", dependencies: ["ClaudeXPolicy"], path: "Tests")
     ]

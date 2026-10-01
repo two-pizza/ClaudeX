@@ -64,14 +64,27 @@ enum SharedStore {
     @discardableResult
     static func write(snapshot: CombinedSnapshot, errors: [String: String]) -> Bool {
         guard let fileURL else { return false }
-        let payload = Payload(snapshot: snapshot, errors: errors, writtenAt: Date())
+        return write(snapshot: snapshot, errors: errors, to: fileURL)
+    }
+
+    /// Explicit destination for offline round-trip tests; production callers
+    /// use the App Group wrapper above.
+    @discardableResult
+    static func write(snapshot: CombinedSnapshot, errors: [String: String],
+                      to fileURL: URL, writtenAt: Date = Date()) -> Bool {
+        let payload = Payload(snapshot: snapshot, errors: errors, writtenAt: writtenAt)
         guard let data = try? encoder.encode(payload) else { return false }
         // Atomic: the widget may read while we write.
         return (try? data.write(to: fileURL, options: .atomic)) != nil
     }
 
     static func read() -> Payload? {
-        guard let fileURL, let data = try? Data(contentsOf: fileURL) else { return nil }
+        guard let fileURL else { return nil }
+        return read(from: fileURL)
+    }
+
+    static func read(from fileURL: URL) -> Payload? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
         return try? decoder.decode(Payload.self, from: data)
     }
 }

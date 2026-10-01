@@ -28,6 +28,11 @@ HTTP 429 pauses only the affected provider: a valid `Retry-After` takes preceden
 otherwise retries wait 5, 10, 20, then 30 minutes until a successful fetch.
 Pauses and request times survive restarts. Manual refresh explains any wait in the
 panel; a request already in progress cannot overlap another for the same provider.
+On restart, the app restores the last widget snapshot with its original success
+times and marks it stale until refreshed. A safety horizon caps implausible server
+or stored pauses at 24 hours; future request-start times are corrected to the current
+time after a backward clock change. Normal server pauses longer than 30 minutes
+are still respected.
 
 ## Install
 
@@ -122,6 +127,10 @@ and URLProtocol responses. They never read CLI credentials or call usage endpoin
 # runtime log
 tail -f ~/Library/Logs/ClaudeX.log
 ```
+
+`--diagnose` respects the same saved pause and minimum interval as the app.
+It may print only a waiting status without making a request; it does not bypass
+rate limiting.
 
 | Symptom | Cause / fix |
 |---|---|

@@ -2,7 +2,7 @@ import Foundation
 
 enum RetryAfter {
     /// RFC 9110: delay-seconds or HTTP-date. A past/invalid value falls back
-    /// to the coordinator's backoff; valid long delays have no local cap.
+    /// to the coordinator's backoff. The coordinator applies the safety horizon.
     static func date(_ raw: String?, receivedAt: Date) -> Date? {
         guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty else { return nil }
