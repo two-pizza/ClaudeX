@@ -11,17 +11,31 @@ enum RefreshStatus: Equatable {
 
     func text(now: Date, calendar: Calendar = .current) -> String {
         func stamp(_ date: Date) -> String {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = calendar.timeZone
-            formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "MMM d HH:mm"
-            return formatter.string(from: date)
+            let format = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "MMM d HH:mm"
+            return Self.formatter(format: format, timeZone: calendar.timeZone).string(from: date)
         }
         switch self {
         case .refreshing: return "Refreshing…"
         case .paused(let date): return "Paused until \(stamp(date)) (rate limited)"
         case .scheduled(let date): return "Next refresh after \(stamp(date))"
         }
+    }
+
+    /// The status bar tooltip asks for this on every redraw; building a
+    /// DateFormatter each time showed up as the hottest frame in a CPU sample.
+    private static var formatters: [String: DateFormatter] = [:]
+    private static let formattersLock = NSLock()
+
+    private static func formatter(format: String, timeZone: TimeZone) -> DateFormatter {
+        let key = timeZone.identifier + "|" + format
+        formattersLock.lock(); defer { formattersLock.unlock() }
+        if let cached = formatters[key] { return cached }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = format
+        formatters[key] = formatter
+        return formatter
     }
 }
 

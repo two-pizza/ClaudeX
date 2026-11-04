@@ -10,6 +10,11 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let panel = UsageMenuView()
     private var timer: Timer?
     private var appearanceObservation: NSKeyValueObservation?
+    /// What the status button shows now. Setting any button property makes
+    /// AppKit redraw the status item's replicas, which reports an
+    /// effectiveAppearance change again; applying only real changes breaks
+    /// that loop (1.2.3 spun a whole core in it).
+    private var shownButton: ButtonState?
     private var clockChangeObserver: NSObjectProtocol?
 
     private let coordinator = RefreshCoordinator(
@@ -50,6 +55,8 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu?.delegate = self
 
         // The ring is drawn for the current theme - redraw when it changes.
+        // The observer fires on every replica redraw too, so compare the
+        // resolved light/dark theme before doing anything.
         appearanceObservation = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             DispatchQueue.main.async { self?.updateStatusButton() }
         }
@@ -100,33 +107,51 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Status bar
 
+    private struct ButtonState: Equatable {
+        var percent: Double?   // nil: no data yet, gray empty ring
+        var title: String
+        var toolTip: String
+        var appearance: NSAppearance.Name?
+    }
+
     private func updateStatusButton() {
         guard let button = statusItem.button else { return }
 
         let snapshot = self.snapshot
-        guard !snapshot.providers.isEmpty else {
-            button.image = Self.ringImage(percent: 0, color: .tertiaryLabelColor)
-            button.title = errors.isEmpty ? "" : " —"
-            button.toolTip = statusDetails
-            return
-        }
-
-        let headline = snapshot.headlinePercent
-        button.image = Self.ringImage(percent: headline, color: UsageMenuView.color(for: headline))
-
-        if isCompact {
-            button.title = ""
+        let appearance = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        let details = statusDetails
+        let state: ButtonState
+        if snapshot.providers.isEmpty {
+            state = ButtonState(percent: nil, title: errors.isEmpty ? "" : " —",
+                                toolTip: details, appearance: appearance)
         } else {
             // One number per provider: its hottest window.
             let parts = snapshot.providers.map { String(format: "%.0f%%", $0.hottestPercent) }
-            button.title = parts.isEmpty ? "" : " " + parts.joined(separator: " · ")
+            let tip = snapshot.providers
+                .map { "\($0.title): \(Int($0.hottestPercent))%" }
+                .joined(separator: "\n")
+                + (details.isEmpty ? "" : "\n" + details)
+            state = ButtonState(percent: snapshot.headlinePercent,
+                                title: isCompact ? "" : " " + parts.joined(separator: " · "),
+                                toolTip: tip, appearance: appearance)
         }
 
-        button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        button.toolTip = snapshot.providers
-            .map { "\($0.title): \(Int($0.hottestPercent))%" }
-            .joined(separator: "\n")
-            + (statusDetails.isEmpty ? "" : "\n" + statusDetails)
+        let previous = shownButton
+        guard state != previous else { return }
+        shownButton = state
+
+        if state.percent != previous?.percent || state.appearance != previous?.appearance || previous == nil {
+            if let percent = state.percent {
+                button.image = Self.ringImage(percent: percent, color: UsageMenuView.color(for: percent))
+            } else {
+                button.image = Self.ringImage(percent: 0, color: .tertiaryLabelColor)
+            }
+        }
+        if previous == nil {
+            button.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        }
+        if state.title != previous?.title { button.title = state.title }
+        if state.toolTip != previous?.toolTip { button.toolTip = state.toolTip }
     }
 
     private var statusDetails: String {
