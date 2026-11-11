@@ -40,8 +40,16 @@ swiftc -O -whole-module-optimization \
        $(find "$ROOT/Sources/Shared" "$ROOT/Sources/App" -name '*.swift')
 
 # Подпись обязательна: без неё SMAppService откажется регистрировать автозапуск.
-echo "==> Подпись (ad-hoc)"
-codesign --force --sign - --identifier "me.andrey.$NAME" "$APP"
+# CLAUDEX_SIGN_IDENTITY="Developer ID Application: ..." - подпись для релиза
+# (hardened runtime и метка времени нужны для заверения Apple, см. release.sh).
+if [ -n "${CLAUDEX_SIGN_IDENTITY:-}" ]; then
+    echo "==> Подпись ($CLAUDEX_SIGN_IDENTITY)"
+    codesign --force --options runtime --timestamp --sign "$CLAUDEX_SIGN_IDENTITY" \
+             --identifier "me.andrey.$NAME" "$APP"
+else
+    echo "==> Подпись (ad-hoc)"
+    codesign --force --sign - --identifier "me.andrey.$NAME" "$APP"
+fi
 
 if [ "${1:-}" = "--install" ]; then
     echo "==> Установка в $INSTALL_DIR"

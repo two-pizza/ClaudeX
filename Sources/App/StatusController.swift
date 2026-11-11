@@ -21,11 +21,24 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cachedPayload: SharedStore.read(),
         fetchers: ["claude": ClaudeProvider.fetch, "codex": CodexProvider.fetch], log: Log.write)
     private var intervalSummaryItem: NSMenuItem?
+    private var updateItem: NSMenuItem?
+    private var updateTimer: Timer?
+    private lazy var updateChecker: UpdateChecker = {
+        let version = currentVersion
+        let checker = UpdateChecker { completion in UpdateCheck.fetch(current: version, completion: completion) }
+        checker.onResult = { [weak self] in self?.showUpdateResult($0) }
+        checker.present = { [weak self] outcome, done in
+            self?.presentUpdateResult(outcome)
+            done()
+        }
+        return checker
+    }()
 
     private enum Defaults {
         static let interval = "refreshIntervalSeconds"
         static let compact  = "compactStatusBar"
         static let codex    = "showCodex"
+        static let lastUpdateCheck = "lastUpdateCheck"
     }
 
     private var refreshInterval: TimeInterval {
@@ -73,6 +86,15 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh(.launch)
         publishToWidget()
         restartTimer()
+
+        // Quiet daily check; the hourly tick only decides whether a day has passed.
+        checkForUpdatesIfDue()
+        let updateTimer = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in
+            self?.checkForUpdatesIfDue()
+        }
+        updateTimer.tolerance = 300
+        RunLoop.main.add(updateTimer, forMode: .common)
+        self.updateTimer = updateTimer
     }
 
     private func restartTimer() {
@@ -199,6 +221,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let codex   = "Show Codex usage"
         static let login   = "Launch at login"
         static let every   = "Refresh every"
+        static let update  = "Check for Updates…"
     }
 
     private func buildMenu() -> NSMenu {
@@ -250,6 +273,12 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
+
+        let updateItem = NSMenuItem(title: ItemTitle.update,
+                                    action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+        self.updateItem = updateItem
 
         let siteItem = NSMenuItem(title: "Open claude.ai usage settings",
                                   action: #selector(openSettings), keyEquivalent: "")
@@ -325,5 +354,73 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openSettings() {
         NSWorkspace.shared.open(URL(string: "https://claude.ai/settings/usage")!)
+    }
+
+    // MARK: Updates
+
+    private var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+
+    /// The Xcode build embeds the widget; the release zip does not.
+    private var includesWidget: Bool {
+        guard let plugIns = Bundle.main.builtInPlugInsURL else { return false }
+        return FileManager.default.fileExists(
+            atPath: plugIns.appendingPathComponent("ClaudeXWidget.appex").path)
+    }
+
+    private func checkForUpdatesIfDue() {
+        let last = UserDefaults.standard.object(forKey: Defaults.lastUpdateCheck) as? Date
+        // A date in the future (clock set back) counts as due.
+        if let last, last <= Date(), Date().timeIntervalSince(last) < UpdateCheck.interval { return }
+        UserDefaults.standard.set(Date(), forKey: Defaults.lastUpdateCheck)
+        updateChecker.check(manual: false)
+    }
+
+    @objc private func checkForUpdatesFromMenu() {
+        UserDefaults.standard.set(Date(), forKey: Defaults.lastUpdateCheck)
+        updateChecker.check(manual: true)
+    }
+
+    /// The menu item names a newer release once a check has found one;
+    /// a failed check leaves it as it was.
+    private func showUpdateResult(_ outcome: UpdateCheck.Outcome) {
+        switch outcome {
+        case .available(let release): updateItem?.title = "Update Available: \(release.version)…"
+        case .upToDate: updateItem?.title = ItemTitle.update
+        case .failed(let reason): Log.write("update check: \(reason)")
+        }
+    }
+
+    private func presentUpdateResult(_ outcome: UpdateCheck.Outcome) {
+        let alert = NSAlert()
+        var openOnConfirm: URL?
+        switch outcome {
+        case .available(let release):
+            alert.messageText = "ClaudeX \(release.version) is available"
+            if includesWidget {
+                alert.informativeText = "You have \(currentVersion). This copy includes the "
+                    + "desktop widget, and the download is the menu bar app only - rebuild from "
+                    + "source to keep the widget."
+                alert.addButton(withTitle: "Open Release Page")
+                openOnConfirm = release.pageURL
+            } else {
+                alert.informativeText = "You have \(currentVersion). Download the zip, "
+                    + "unzip it and replace ClaudeX in Applications."
+                alert.addButton(withTitle: "Download")
+                openOnConfirm = release.downloadURL ?? release.pageURL
+            }
+            alert.addButton(withTitle: "Later")
+        case .upToDate(let current):
+            alert.messageText = "You're up to date"
+            alert.informativeText = "ClaudeX \(current) is the latest version."
+        case .failed(let reason):
+            alert.messageText = "Could not check for updates"
+            alert.informativeText = reason
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn, let url = openOnConfirm {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
