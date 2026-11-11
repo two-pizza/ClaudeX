@@ -15,15 +15,14 @@ final class UsagePanelContentTests: XCTestCase {
         XCTAssertNil(snapshot.lastSuccessAt)
     }
 
-    func testWaitAndRefreshingAreNotErrorsAndSuccessFooterIsPreserved() {
-        let usage = ProviderUsage(id: "claude", title: "Claude", plan: "Test", rows: [],
-                                  credits: nil, fetchedAt: now.addingTimeInterval(-120))
+    func testFreshPanelShowsOnlyTheWindows() {
+        let row = UsageRow(title: "Weekly", percent: 16, resetsAt: nil, isSession: false, isActive: true)
+        let usage = ProviderUsage(id: "codex", title: "Codex", plan: "Pro", rows: [row],
+                                  credits: "Credits: 63300.27 left", fetchedAt: now.addingTimeInterval(-120))
         let snapshot = CombinedSnapshot(providers: [usage], fetchedAt: now)
         for status in [RefreshStatus.scheduled(after: now.addingTimeInterval(60)), .refreshing] {
-            let items = UsagePanelContent.make(snapshot: snapshot, errors: [:], statuses: ["claude": status], now: now)
-            XCTAssertTrue(items.contains(.note(status.text(now: now))))
-            XCTAssertTrue(items.contains(.footer("Updated 2 min ago")))
-            XCTAssertFalse(items.contains { if case .warning = $0 { return true }; return false })
+            let items = UsagePanelContent.make(snapshot: snapshot, errors: [:], statuses: ["codex": status], now: now)
+            XCTAssertEqual(items, [.header(title: "Codex", trailing: "Pro"), .row(row)])
         }
     }
 

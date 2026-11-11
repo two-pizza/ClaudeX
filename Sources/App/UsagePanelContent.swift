@@ -20,8 +20,9 @@ enum UsagePanelContent {
             if !items.isEmpty { items.append(.divider) }
             items.append(.header(title: provider?.title ?? id.capitalized, trailing: provider?.plan ?? ""))
             if let provider {
+                // Credits are kept in the snapshot but not shown: the panel stays
+                // limited to the windows that can stop you.
                 items.append(contentsOf: provider.rows.map { .row($0) })
-                if let credits = provider.credits { items.append(.note(credits)) }
                 if errors[id] != nil {
                     let when = provider.fetchedAt.map { relativeStamp($0, now: now) } ?? "earlier"
                     items.append(.warning("Stale · last update \(when)"))
@@ -29,7 +30,9 @@ enum UsagePanelContent {
             } else {
                 items.append(.note("No data yet"))
             }
-            if let status = statuses[id] {
+            // Only a rate-limit pause explains numbers that stop moving; the
+            // next scheduled refresh lives in the status item tooltip.
+            if let status = statuses[id], case .paused = status {
                 items.append(.note(status.text(now: now)))
             }
             if let error = errors[id] {
@@ -39,7 +42,9 @@ enum UsagePanelContent {
             }
         }
         if items.isEmpty { items.append(.note("No data yet")) }
-        if let success = snapshot.lastSuccessAt {
+        // Fresh data needs no timestamp; once a provider fails, say how old
+        // the newest numbers are.
+        if !errors.isEmpty, let success = snapshot.lastSuccessAt {
             items.append(.footer("Updated \(relativeStamp(success, now: now))"))
         }
         return items

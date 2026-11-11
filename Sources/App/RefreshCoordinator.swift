@@ -214,7 +214,7 @@ final class RefreshCoordinator {
                 }
             }
         }
-        onChange?() // A skipped manual request still explains why in the panel.
+        onChange?() // A skipped manual request still explains why: a pause in the panel, a wait in the tooltip.
         if visibilityChanged { onSnapshotChange?() }
     }
 

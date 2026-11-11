@@ -21,7 +21,7 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cachedPayload: SharedStore.read(),
         fetchers: ["claude": ClaudeProvider.fetch, "codex": CodexProvider.fetch], log: Log.write)
     private var intervalSummaryItem: NSMenuItem?
-    private var updateItem: NSMenuItem?
+    private var availableUpdateItem: NSMenuItem?
     private var updateTimer: Timer?
     private lazy var updateChecker: UpdateChecker = {
         let version = currentVersion
@@ -237,6 +237,21 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
+        // Shown only while a newer release is out; the Settings item stays.
+        let availableItem = NSMenuItem(title: "", action: #selector(checkForUpdatesFromMenu),
+                                       keyEquivalent: "")
+        availableItem.target = self
+        availableItem.isHidden = true
+        menu.addItem(availableItem)
+        self.availableUpdateItem = availableItem
+
+        // Everything that is set once lives one level down, so the menu
+        // itself stays at the numbers plus three items.
+        let settings = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settingsItem.submenu = settings
+        menu.addItem(settingsItem)
+
         let intervalItem = NSMenuItem(title: ItemTitle.every, action: nil, keyEquivalent: "")
         let intervalMenu = NSMenu()
         for (title, seconds) in [("1 minute", 60.0), ("2 minutes", 120.0),
@@ -253,37 +268,38 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         intervalMenu.addItem(summary)
         intervalSummaryItem = summary
         intervalItem.submenu = intervalMenu
-        menu.addItem(intervalItem)
+        settings.addItem(intervalItem)
 
         let compactItem = NSMenuItem(title: ItemTitle.compact,
                                      action: #selector(toggleCompact), keyEquivalent: "")
         compactItem.target = self
-        menu.addItem(compactItem)
+        settings.addItem(compactItem)
 
         if CodexProvider.isInstalled {
             let codexItem = NSMenuItem(title: ItemTitle.codex,
                                        action: #selector(toggleCodex), keyEquivalent: "")
             codexItem.target = self
-            menu.addItem(codexItem)
+            settings.addItem(codexItem)
         }
 
         let loginItem = NSMenuItem(title: ItemTitle.login,
                                    action: #selector(toggleLoginItem), keyEquivalent: "")
         loginItem.target = self
-        menu.addItem(loginItem)
+        settings.addItem(loginItem)
 
-        menu.addItem(.separator())
+        settings.addItem(.separator())
 
         let updateItem = NSMenuItem(title: ItemTitle.update,
                                     action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
         updateItem.target = self
-        menu.addItem(updateItem)
-        self.updateItem = updateItem
+        settings.addItem(updateItem)
 
         let siteItem = NSMenuItem(title: "Open claude.ai usage settings",
                                   action: #selector(openSettings), keyEquivalent: "")
         siteItem.target = self
-        menu.addItem(siteItem)
+        settings.addItem(siteItem)
+
+        menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)),
                                   keyEquivalent: "q")
@@ -297,7 +313,8 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh(.menu)
         intervalSummaryItem?.title = RefreshCoordinator.intervalSummary(
             selected: refreshInterval, showCodex: showCodex)
-        for item in menu.items {
+        let settingsItems = menu.items.compactMap(\.submenu).flatMap(\.items)
+        for item in settingsItems {
             switch item.title {
             case ItemTitle.compact: item.state = isCompact ? .on : .off
             case ItemTitle.codex:   item.state = showCodex ? .on : .off
@@ -382,12 +399,14 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateChecker.check(manual: true)
     }
 
-    /// The menu item names a newer release once a check has found one;
-    /// a failed check leaves it as it was.
+    /// A newer release gets its own top-level item; a failed check leaves
+    /// the menu as it was.
     private func showUpdateResult(_ outcome: UpdateCheck.Outcome) {
         switch outcome {
-        case .available(let release): updateItem?.title = "Update Available: \(release.version)…"
-        case .upToDate: updateItem?.title = ItemTitle.update
+        case .available(let release):
+            availableUpdateItem?.title = "Update Available: \(release.version)…"
+            availableUpdateItem?.isHidden = false
+        case .upToDate: availableUpdateItem?.isHidden = true
         case .failed(let reason): Log.write("update check: \(reason)")
         }
     }

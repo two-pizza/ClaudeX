@@ -14,13 +14,17 @@ Know how much of your session and weekly window is left - without opening <code>
 Exactly what Claude Code's `/usage` screen shows - live in the menu bar:
 
 - **Claude** - the 5-hour session window when your plan has one, weekly "All models", per-model weekly windows, reset times
-- **Codex** (optional) - your ChatGPT plan's session and weekly windows, plus the credits balance
+- **Codex** (optional) - your ChatGPT plan's session and weekly windows
+
+Only the windows are shown while everything works. The next scheduled refresh is in the
+tooltip over the ring.
 
 The ring in the menu bar reflects the hottest window: blue below 75%, orange from 75%, red from 90%.
 
 When a provider cannot be refreshed, its last numbers stay on screen with an orange
 **Stale · last update N min ago** line and the reason, and the widget marks it `stale`.
-The other provider is unaffected, and "Updated" always means the last successful fetch.
+The other provider is unaffected, and an "Updated" footer then says when the newest
+numbers arrived.
 All refresh sources respect a separate schedule for each provider. Claude is polled
 at most once every five minutes (or the selected interval, if longer); Codex follows
 the selected interval. The interval submenu shows both effective values.
@@ -117,11 +121,14 @@ Keychain item it reads. The widget extension is sandboxed, as macOS requires.
 
 | Item | |
 |---|---|
-| **Refresh now** (⌘R) | refresh eligible providers; show the reason and deadline for any wait |
-| **Refresh every** | 1 / 2 / 5 / 15 minutes (default 2); Claude minimum 5 minutes |
-| **Compact** | ring only, no percentages |
-| **Show Codex usage** | hide/show the Codex section |
-| **Launch at login** | via `SMAppService` |
+| **Refresh now** (⌘R) | refresh eligible providers; a rate-limit pause is shown in the panel |
+| **Update Available: X…** | appears only when a newer release is out |
+| **Settings ▸ Refresh every** | 1 / 2 / 5 / 15 minutes (default 2); Claude minimum 5 minutes |
+| **Settings ▸ Compact** | ring only, no percentages |
+| **Settings ▸ Show Codex usage** | hide/show the Codex section |
+| **Settings ▸ Launch at login** | via `SMAppService` |
+| **Settings ▸ Check for Updates…** | asks GitHub for the latest release and opens it in the browser; also checked quietly once a day |
+| **Settings ▸ Open claude.ai usage settings** | the usage page on claude.ai |
 
 ## Test without network or credentials
 
