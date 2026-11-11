@@ -6,19 +6,30 @@ struct ClaudeCredentials {
     let subscriptionType: String?
     let rateLimitTier: String?
 
-    /// "Max (5x)", "Pro", etc. - for the panel header.
+    /// "Max", "Ultra", "Pro", etc. - for the panel header.
     var planLabel: String {
+        let tier = rateLimitTier?.lowercased()
         let base: String
         switch subscriptionType?.lowercased() {
-        case "max": base = "Max"
+        case "ultra": return "Ultra"
+        case "max":
+            // Max 20x was renamed Ultra and Max 5x became plain Max; the
+            // Keychain still says "max" for both, only the tier tells them apart.
+            // Only the tiers seen so far are mapped - an unknown one keeps the
+            // generic "Max (Nx)" label below.
+            switch tier {
+            case "default_claude_max_20x", "max_20x": return "Ultra"
+            case "default_claude_max_5x", "max_5x": return "Max"
+            default: base = "Max"
+            }
         case "pro": base = "Pro"
         case "team": base = "Team"
         case "enterprise": base = "Enterprise"
         case .some(let other) where !other.isEmpty: base = other.capitalized
         default: return "Claude"
         }
-        // rateLimitTier on Max plans looks like "max_5x" / "max_20x".
-        if let tier = rateLimitTier?.lowercased(),
+        // Any other tier: show its multiplier if it has one.
+        if let tier,
            let range = tier.range(of: #"(\d+)x"#, options: .regularExpression) {
             return "\(base) (\(tier[range]))"
         }

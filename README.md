@@ -13,7 +13,7 @@ Know how much of your session and weekly window is left - without opening <code>
 
 Exactly what Claude Code's `/usage` screen shows - live in the menu bar:
 
-- **Claude** - current 5-hour session, weekly "All models", per-model weekly windows, reset times
+- **Claude** - the 5-hour session window when your plan has one, weekly "All models", per-model weekly windows, reset times
 - **Codex** (optional) - your ChatGPT plan's session and weekly windows, plus the credits balance
 
 The ring in the menu bar reflects the hottest window: blue below 75%, orange from 75%, red from 90%.
@@ -36,16 +36,31 @@ are still respected.
 
 ## Install
 
+Requires a Mac with Apple silicon and Claude Code you are signed in to.
+The menu bar app runs on macOS 13 or later; the build with the desktop widget needs macOS 14.
+
+### Download
+
+1. Download `ClaudeX-<version>-menubar.zip` from the [latest release](https://github.com/two-pizza/ClaudeX/releases/latest).
+2. Unzip it and move `ClaudeX.app` to Applications.
+3. Open the app. macOS blocks it the first time, because the build is not notarized by Apple.
+4. Go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
+
+The download is the menu bar app only; the desktop widget needs Xcode (see below).
+
+### Build from source
+
 ```bash
 git clone https://github.com/two-pizza/ClaudeX.git
 cd ClaudeX
 ./build.sh --install
 ```
 
-That's it. No Xcode, no dependencies - a single `swiftc` invocation from
-Command Line Tools. The app lands in `~/Applications` and starts immediately.
+No Xcode, no dependencies - a single `swiftc` invocation from Command Line Tools.
+The app lands in `~/Applications` and starts immediately.
 This builds the menu bar app; the desktop widget needs Xcode (see below).
-Or grab a prebuilt app from [Releases](https://github.com/two-pizza/ClaudeX/releases).
+
+### First launch
 
 On first launch macOS may ask for Keychain access - click **Always Allow**.
 The permission is granted to `/usr/bin/security`, so rebuilding the app never re-prompts.

@@ -54,7 +54,7 @@ extension SharedStore.Payload {
     static var preview: SharedStore.Payload {
         let now = Date()
         let claude = ProviderUsage(
-            id: "claude", title: "Claude", plan: "Max (5x)",
+            id: "claude", title: "Claude", plan: "Max",
             rows: [
                 UsageRow(title: "Current session", percent: 31,
                          resetsAt: now.addingTimeInterval(3 * 3600), isSession: true, isActive: true),
