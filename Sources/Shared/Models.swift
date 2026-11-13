@@ -70,7 +70,7 @@ struct MenuBarSummary: Equatable {
             guard !provider.rows.isEmpty else { return "\(provider.title): no data" }
             let shown = provider.shownRow(mode)
             let windows = provider.rows.map { row in
-                "\(row.title) \(Int(row.percent))%" + (row == shown ? " (shown)" : "")
+                "\(row.title) " + String(format: "%.0f%%", row.percent) + (row == shown ? " (shown)" : "")
             }.joined(separator: " · ")
             let noSession = mode == .sessionPreferred && !provider.rows.contains(where: \.isSession)
             return "\(provider.title): \(windows)" + (noSession ? " - no session window" : "")

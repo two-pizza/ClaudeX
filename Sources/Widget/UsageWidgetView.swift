@@ -182,4 +182,3 @@ enum UsageColor {
         }
     }
 }
-

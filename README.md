@@ -14,12 +14,12 @@ Know how much of your session and weekly window is left - without opening <code>
 Exactly what Claude Code's `/usage` screen shows - live in the menu bar:
 
 - **Claude** - the 5-hour session window when your plan has one, weekly "All models", per-model weekly windows, reset times
-- **Codex** (optional) - your ChatGPT plan's session and weekly windows
+- **Codex** (optional) - your ChatGPT plan's windows: session, weekly or monthly, whichever your plan has
 
 Only the windows are shown while everything works. The next scheduled refresh is in the
 tooltip over the ring.
 
-The ring in the menu bar reflects the hottest window: blue below 75%, orange from 75%, red from 90%.
+By default the menu bar shows the busiest window of each service and the ring the busiest of them all: blue below 75%, orange from 75%, red from 90%. Settings can switch the numbers to the session window and the ring to one service. The tooltip lists every window and marks the one shown.
 
 When a provider cannot be refreshed, its last numbers stay on screen with an orange
 **Stale · last update N min ago** line and the reason, and the widget marks it `stale`.
@@ -124,6 +124,8 @@ Keychain item it reads. The widget extension is sandboxed, as macOS requires.
 | **Refresh now** (⌘R) | refresh eligible providers; a rate-limit pause is shown in the panel |
 | **Update Available: X…** | appears only when a newer release is out |
 | **Settings ▸ Refresh every** | 1 / 2 / 5 / 15 minutes (default 2); Claude minimum 5 minutes |
+| **Settings ▸ Menu bar shows** | Most used window (default) / Session when available - the 5-hour session if your plan has one, otherwise the busiest window |
+| **Settings ▸ Ring** | All providers (default) / Claude / Codex - shown when Codex is installed |
 | **Settings ▸ Compact** | ring only, no percentages |
 | **Settings ▸ Show Codex usage** | hide/show the Codex section |
 | **Settings ▸ Launch at login** | via `SMAppService` |
