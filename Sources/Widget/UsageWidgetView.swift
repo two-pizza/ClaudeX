@@ -183,22 +183,3 @@ enum UsageColor {
     }
 }
 
-enum ResetText {
-    private static let weekdayTime: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.dateFormat = "EEE HH:mm"
-        return f
-    }()
-
-    static func make(_ row: UsageRow) -> String? {
-        guard let resetsAt = row.resetsAt else { return nil }
-        if row.isSession {
-            let seconds = max(0, resetsAt.timeIntervalSinceNow)
-            let hours = Int(seconds) / 3600
-            let minutes = (Int(seconds) % 3600) / 60
-            return hours > 0 ? "resets in \(hours) h \(minutes) min" : "resets in \(minutes) min"
-        }
-        return "resets \(weekdayTime.string(from: resetsAt))"
-    }
-}

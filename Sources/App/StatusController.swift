@@ -39,6 +39,8 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let compact  = "compactStatusBar"
         static let codex    = "showCodex"
         static let lastUpdateCheck = "lastUpdateCheck"
+        static let menuBarWindow = "menuBarWindow"
+        static let ringSource = "ringSource"
     }
 
     private var refreshInterval: TimeInterval {
@@ -46,6 +48,12 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return stored.isFinite && stored > 0 ? stored : 120
     }
     private var isCompact: Bool { UserDefaults.standard.bool(forKey: Defaults.compact) }
+    private var menuBarWindow: MenuBarWindow {
+        UserDefaults.standard.string(forKey: Defaults.menuBarWindow).flatMap(MenuBarWindow.init) ?? .mostUsed
+    }
+    private var ringSource: RingSource {
+        UserDefaults.standard.string(forKey: Defaults.ringSource).flatMap(RingSource.init) ?? .all
+    }
     private var showCodex: Bool {
         guard CodexProvider.isInstalled else { return false }
         return UserDefaults.standard.object(forKey: Defaults.codex) as? Bool ?? true
@@ -147,15 +155,11 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             state = ButtonState(percent: nil, title: errors.isEmpty ? "" : " —",
                                 toolTip: details, appearance: appearance)
         } else {
-            // One number per provider: its hottest window.
-            let parts = snapshot.providers.map { String(format: "%.0f%%", $0.hottestPercent) }
-            let tip = snapshot.providers
-                .map { "\($0.title): \(Int($0.hottestPercent))%" }
-                .joined(separator: "\n")
-                + (details.isEmpty ? "" : "\n" + details)
-            state = ButtonState(percent: snapshot.headlinePercent,
-                                title: isCompact ? "" : " " + parts.joined(separator: " · "),
-                                toolTip: tip, appearance: appearance)
+            let summary = MenuBarSummary.make(snapshot: snapshot, mode: menuBarWindow, ring: ringSource)
+            state = ButtonState(percent: summary.ringPercent,
+                                title: isCompact ? "" : " " + summary.parts.joined(separator: " · "),
+                                toolTip: summary.toolTip + (details.isEmpty ? "" : "\n" + details),
+                                appearance: appearance)
         }
 
         let previous = shownButton
@@ -222,7 +226,14 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let login   = "Launch at login"
         static let every   = "Refresh every"
         static let update  = "Check for Updates…"
+        static let shows   = "Menu bar shows"
+        static let ring    = "Ring"
     }
+
+    private static let windowChoices: [(String, MenuBarWindow)] = [
+        ("Most used window", .mostUsed), ("Session when available", .sessionPreferred)]
+    private static let ringChoices: [(String, RingSource)] = [
+        ("All providers", .all), ("Claude", .claude), ("Codex", .codex)]
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
@@ -269,6 +280,30 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         intervalSummaryItem = summary
         intervalItem.submenu = intervalMenu
         settings.addItem(intervalItem)
+
+        let showsItem = NSMenuItem(title: ItemTitle.shows, action: nil, keyEquivalent: "")
+        let showsMenu = NSMenu()
+        for (title, mode) in Self.windowChoices {
+            let item = NSMenuItem(title: title, action: #selector(setMenuBarWindow(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            showsMenu.addItem(item)
+        }
+        showsItem.submenu = showsMenu
+        settings.addItem(showsItem)
+
+        if CodexProvider.isInstalled {
+            let ringItem = NSMenuItem(title: ItemTitle.ring, action: nil, keyEquivalent: "")
+            let ringMenu = NSMenu()
+            for (title, source) in Self.ringChoices {
+                let item = NSMenuItem(title: title, action: #selector(setRingSource(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = source.rawValue
+                ringMenu.addItem(item)
+            }
+            ringItem.submenu = ringMenu
+            settings.addItem(ringItem)
+        }
 
         let compactItem = NSMenuItem(title: ItemTitle.compact,
                                      action: #selector(toggleCompact), keyEquivalent: "")
@@ -319,6 +354,14 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case ItemTitle.compact: item.state = isCompact ? .on : .off
             case ItemTitle.codex:   item.state = showCodex ? .on : .off
             case ItemTitle.login:   item.state = SMAppService.mainApp.status == .enabled ? .on : .off
+            case ItemTitle.shows:
+                item.submenu?.items.forEach {
+                    $0.state = ($0.representedObject as? String) == menuBarWindow.rawValue ? .on : .off
+                }
+            case ItemTitle.ring:
+                item.submenu?.items.forEach {
+                    $0.state = ($0.representedObject as? String) == ringSource.rawValue ? .on : .off
+                }
             case ItemTitle.every:
                 item.submenu?.items.forEach {
                     $0.state = ($0.representedObject as? Double) == refreshInterval ? .on : .off
@@ -342,6 +385,18 @@ final class StatusController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let seconds = sender.representedObject as? Double else { return }
         UserDefaults.standard.set(seconds, forKey: Defaults.interval)
         refresh(.settings)
+    }
+
+    @objc private func setMenuBarWindow(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, MenuBarWindow(rawValue: raw) != nil else { return }
+        UserDefaults.standard.set(raw, forKey: Defaults.menuBarWindow)
+        updateStatusButton()   // no fetch: the snapshot already has every window
+    }
+
+    @objc private func setRingSource(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, RingSource(rawValue: raw) != nil else { return }
+        UserDefaults.standard.set(raw, forKey: Defaults.ringSource)
+        updateStatusButton()
     }
 
     @objc private func toggleCompact() {

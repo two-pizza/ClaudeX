@@ -233,17 +233,9 @@ enum CodexProvider {
     }
 
     private static func row(window: Response.Window, percent: Double) -> UsageRow {
-        // Codex does not name its windows; label them by duration.
         let seconds = window.limitWindowSeconds ?? 0
-        let isSession = seconds > 0 && seconds <= 6 * 3600
-        let title: String
-        if isSession {
-            title = "Current session"
-        } else if seconds >= 6 * 86400 {
-            title = "Weekly"
-        } else {
-            title = "\(Int(seconds / 3600))-hour window"
-        }
+        let isSession = CodexWindowName.isSession(seconds: seconds)
+        let title = CodexWindowName.title(seconds: seconds)
         return UsageRow(title: title, percent: percent,
                         resetsAt: window.resetAt.map { Date(timeIntervalSince1970: $0) },
                         isSession: isSession, isActive: true)
